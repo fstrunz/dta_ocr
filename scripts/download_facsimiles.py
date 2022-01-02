@@ -264,6 +264,7 @@ async def download_facsimile(
         await write_error_to_download_list(
             db, facsimile, "could not find hires url"
         )
+        return None
 
     try:
         async with http.get(hires_url) as response:
@@ -284,6 +285,7 @@ async def download_facsimile(
         await write_error_to_download_list(
             db, facsimile, "download failed"
         )
+        return None
 
 
 async def create_download_list_tables(db: aiosqlite.Connection):
@@ -366,8 +368,28 @@ async def main():
     download_list_db = Path(args.download_list)
 
     async with aiosqlite.connect(download_list_db) as db:
-        hires_dict = await fetch_all_hires_urls_from_db(db)
         await create_download_list_tables(db)
+
+        async with db.execute(
+            """SELECT COUNT(dta_dirname) FROM facsimiles
+               NATURAL JOIN documents
+               WHERE facsimiles.status = 'finished'
+               GROUP BY dta_dirname
+               HAVING COUNT(dta_dirname) = documents.page_count"""
+        ) as cursor:
+            count = 0
+            fac_count = 0
+            async for c in cursor:
+                count += 1
+                fac_count += c[0]
+
+            print(
+                f"So far, {count} documents " +
+                f"have been fully downloaded, encompassing {fac_count} " +
+                "facsimiles."
+            )
+
+        hires_dict = await fetch_all_hires_urls_from_db(db)
 
         async with aiohttp.ClientSession() as http:
             pending = await find_pending_facsimiles(
@@ -384,7 +406,11 @@ async def main():
 
             async def worker():
                 while not tasks.empty():
-                    fac, data, ext = await tasks.get_nowait()
+                    result = await tasks.get_nowait()
+                    if result is None:
+                        continue
+
+                    fac, data, ext = result
 
                     doc_dir = output_path / Path(fac.dta_dirname)
                     doc_dir.mkdir(exist_ok=True)
