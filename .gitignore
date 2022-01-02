@@ -1,3 +1,7 @@
 .vscode/
 venv/
 *.db
+
+# DTA Corpus
+dta_komplett_*/
+facsimiles/
