@@ -5,11 +5,12 @@ import aiosqlite
 import aiohttp
 import mimetypes
 import traceback
+import re
+import collections
 from aiofile import async_open
 from lxml import etree
 from pathlib import Path
 from dataclasses import dataclass
-import re
 
 TEI_NAMESPACES = {"tei": "http://www.tei-c.org/ns/1.0"}
 FACSIMILES_HTML_URL = "https://www.deutschestextarchiv.de/book/images/{}"
@@ -396,17 +397,17 @@ async def main():
                 http, download_list_db, corpus_path
             )
 
-            tasks = asyncio.Queue()
-            for fac in pending:
-                tasks.put_nowait(
-                    asyncio.create_task(
-                        download_facsimile(http, db, fac, hires_dict),
-                    )
-                )
+        tasks = collections.deque(pending)
 
-            async def worker():
-                while not tasks.empty():
-                    result = await tasks.get_nowait()
+        async def worker():
+            async with aiohttp.ClientSession() as http:
+                while tasks:
+                    facsimile = tasks.pop()
+
+                    result = await download_facsimile(
+                        http, db, facsimile, hires_dict
+                    )
+
                     if result is None:
                         continue
 
@@ -420,9 +421,9 @@ async def main():
                         print(f"Writing {file_path}...")
                         await file.write(data)
 
-            await asyncio.gather(
-                *[worker() for _ in range(args.coroutine_count)]
-            )
+        await asyncio.gather(
+            *[worker() for _ in range(args.coroutine_count)]
+        )
 
 if __name__ == "__main__":
     asyncio.run(main())
