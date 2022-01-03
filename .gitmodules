@@ -1,3 +1,6 @@
 [submodule "ocropy"]
 	path = ocropy
 	url = git@github.com:ocropus/ocropy.git
+[submodule "page-py"]
+	path = page-py
+	url = git@github.com:fstrunz/page-py.git

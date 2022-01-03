@@ -1,10 +1,16 @@
 import argparse
+from datetime import datetime
 import multiprocessing
 import subprocess
 import os
 import itertools
 from pathlib import Path
-from typing import Iterable, List, Tuple, TypeVar
+from typing import Any, Dict, Iterable, List, Tuple, TypeVar
+from PIL import Image
+from kraken import pageseg
+from page.elements import PcGts, Page, Metadata, Region, Line, TextRegion
+from dta_ocr import BoundingBox
+from lxml import etree
 
 T = TypeVar("T")
 
@@ -36,7 +42,8 @@ def facsimiles(facsimile_path: Path) -> Iterable[Tuple[Path, Path]]:
                 if (
                     fac_path.is_file() and
                     not fac_path.name.endswith(".bin.png") and
-                    not fac_path.name.endswith(".nrm.png")
+                    not fac_path.name.endswith(".nrm.png") and
+                    not fac_path.name.endswith(".xml")
                 ):
                     yield fac_path, doc_path
 
@@ -81,7 +88,7 @@ def binarise_facsimile_chunk(
 
 def binarise_facsimiles(
     ocropy_venv: Path, facsimile_path: Path, process_count: int
-) -> bool:
+):
     facsimile_count = sum(1 for _ in facsimiles(facsimile_path))
 
     chunk_size = facsimile_count // process_count
@@ -98,10 +105,65 @@ def binarise_facsimiles(
         )
 
 
+# computes regions in reading order
+def segmentation_to_regions(seg: Dict[str, Any]) -> List[Region]:
+    line_id = 0
+    regions = []
+
+    for xmin, ymin, xmax, ymax in seg["boxes"]:
+        bbox = BoundingBox(xmin, ymin, xmax, ymax)
+        coords = bbox.to_coords()
+        line = Line(f"l{line_id}", coords, None, None)
+        regions.append(TextRegion(f"r{line_id}", coords, [], None, [line]))
+        line_id += 1
+
+    return regions
+
+
+def segment_facsimile(
+    inp: Tuple[Path, Path]
+):
+    fac_path, parent_dir = inp
+    fac_name = fac_path.stem
+
+    bin_path = parent_dir / "bin" / f"{fac_name}.bin.png"
+    if not bin_path.is_file():
+        print(f"Could not find binarisation for {fac_path}!!")
+        return
+
+    bin_img = Image.open(bin_path)
+    segmentation = pageseg.segment(bin_img)
+
+    now = datetime.now()
+    metadata = Metadata(
+        "segment_facsimiles.py", now, now,
+        "Generated using Kraken legacy segmentation."
+    )
+    page = Page(
+        (bin_img.width, bin_img.height), fac_path.name,
+        segmentation_to_regions(segmentation)
+    )
+    pcgts = PcGts(None, metadata, page)
+    pcgts_xml = pcgts.to_element({})
+
+    pagexml_path = parent_dir / f"{fac_name}.seg.xml"
+    with pagexml_path.open("wb") as file:
+        print(f"Writing {pagexml_path}...")
+        file.write(etree.tostring(pcgts_xml, pretty_print=True))
+
+
+def segment_facsimiles(
+    facsimile_path: Path, process_count: int
+):
+    with multiprocessing.Pool(process_count) as pool:
+        pool.map(segment_facsimile, facsimiles(facsimile_path))
+
+
 def preprocess_facsimiles(
     facsimile_path: Path, process_count: int, ocropy_venv: Path
 ):
-    binarise_facsimiles(ocropy_venv, facsimile_path, process_count)
+    # binarise_facsimiles(ocropy_venv, facsimile_path, process_count)
+    segment_facsimiles(facsimile_path, process_count)
 
 
 def main():

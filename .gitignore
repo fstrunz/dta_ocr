@@ -1,6 +1,8 @@
 .vscode/
 venv/
 *.db
+*.mlmodel
+*.pronn
 
 # DTA Corpus
 dta_komplett_*/
