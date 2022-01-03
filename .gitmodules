@@ -1,0 +1,3 @@
+[submodule "ocropy"]
+	path = ocropy
+	url = git@github.com:ocropus/ocropy.git
