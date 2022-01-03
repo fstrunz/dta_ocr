@@ -7,9 +7,11 @@ import itertools
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple, TypeVar
 from PIL import Image
-from kraken import pageseg
-from page.elements import PcGts, Page, Metadata, Region, Line, TextRegion
-from dta_ocr import BoundingBox
+from kraken import blla
+from page.elements import PcGts, Page, Metadata, Region, Point
+from page.elements import Line, TextRegion
+from page.elements.coords import Coordinates, Baseline
+from page.constants import DEFAULT_NAMESPACE_MAP
 from lxml import etree
 
 T = TypeVar("T")
@@ -110,11 +112,14 @@ def segmentation_to_regions(seg: Dict[str, Any]) -> List[Region]:
     line_id = 0
     regions = []
 
-    for xmin, ymin, xmax, ymax in seg["boxes"]:
-        bbox = BoundingBox(xmin, ymin, xmax, ymax)
-        coords = bbox.to_coords()
-        line = Line(f"l{line_id}", coords, None, None)
-        regions.append(TextRegion(f"r{line_id}", coords, [], None, [line]))
+    for line in seg["lines"]:
+        baseline = Baseline([Point(p[0], p[1]) for p in line["baseline"]])
+        boundary = Coordinates([Point(p[0], p[1]) for p in line["boundary"]])
+
+        text_line = Line(f"l{line_id}", boundary, baseline, None)
+        region = TextRegion(f"r{line_id}", boundary, [], None, [text_line])
+        regions.append(region)
+
         line_id += 1
 
     return regions
@@ -131,22 +136,23 @@ def segment_facsimile(
         print(f"Could not find binarisation for {fac_path}!!")
         return
 
+    print(f"Segmenting {bin_path}...")
     bin_img = Image.open(bin_path)
-    segmentation = pageseg.segment(bin_img)
+    segmentation = blla.segment(bin_img)
 
     now = datetime.now()
     metadata = Metadata(
         "segment_facsimiles.py", now, now,
-        "Generated using Kraken legacy segmentation."
+        "Generated using Kraken baseline segmentation."
     )
     page = Page(
-        (bin_img.width, bin_img.height), fac_path.name,
+        (bin_img.width, bin_img.height), bin_path.name,
         segmentation_to_regions(segmentation)
     )
     pcgts = PcGts(None, metadata, page)
-    pcgts_xml = pcgts.to_element({})
+    pcgts_xml = pcgts.to_element(DEFAULT_NAMESPACE_MAP)
 
-    pagexml_path = parent_dir / f"{fac_name}.seg.xml"
+    pagexml_path = parent_dir / "bin" / f"{fac_name}.seg.xml"
     with pagexml_path.open("wb") as file:
         print(f"Writing {pagexml_path}...")
         file.write(etree.tostring(pcgts_xml, pretty_print=True))
@@ -155,8 +161,8 @@ def segment_facsimile(
 def segment_facsimiles(
     facsimile_path: Path, process_count: int
 ):
-    with multiprocessing.Pool(process_count) as pool:
-        pool.map(segment_facsimile, facsimiles(facsimile_path))
+    for fac_path in facsimiles(facsimile_path):
+        segment_facsimile(fac_path)
 
 
 def preprocess_facsimiles(
