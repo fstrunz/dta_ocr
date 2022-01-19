@@ -168,7 +168,10 @@ def segment_facsimiles(
 def preprocess_facsimiles(
     facsimile_path: Path, process_count: int, ocropy_venv: Path
 ):
-    # binarise_facsimiles(ocropy_venv, facsimile_path, process_count)
+    print("Binarising facsimiles...")
+    binarise_facsimiles(ocropy_venv, facsimile_path, process_count)
+
+    print("Segmenting facsimiles...")
     segment_facsimiles(facsimile_path, process_count)
 
 
