@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List
 from page.elements import Point, Coordinates
 
+
 @dataclass(frozen=True, eq=True)
 class BoundingBox:
     xmin: int

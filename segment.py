@@ -142,7 +142,7 @@ def segment_facsimile(
 
     now = datetime.now()
     metadata = Metadata(
-        "segment_facsimiles.py", now, now,
+        "segment.py", now, now,
         "Generated using Kraken baseline segmentation."
     )
 
@@ -183,10 +183,10 @@ def main():
     cpu_count = multiprocessing.cpu_count()
 
     arg_parser = argparse.ArgumentParser(
-        "segment_facsimiles",
+        "segment",
         description=(
             "Given a set of facsimiles, in the same format as the output " +
-            "of download_facsimiles.py, preprocesses (binarisation, " +
+            "of download.py, preprocesses (binarisation, " +
             "deskewing) and segments all images."
         )
     )
@@ -210,7 +210,7 @@ def main():
         help=(
             "A directory containing document subdirectories, which contain " +
             "page numbered facsimiles, analogous to the output of " +
-            "download_facsimiles.py."
+            "download.py."
         )
     )
     args = arg_parser.parse_args()

@@ -323,7 +323,7 @@ async def create_download_list_tables(db: aiosqlite.Connection):
 
 async def main():
     arg_parser = argparse.ArgumentParser(
-        "download_facsimiles",
+        "download",
         description=(
             "Given an extracted copy of the complete DTA corpus, " +
             "download the corresponding facsimiles. Such a corpus " +
