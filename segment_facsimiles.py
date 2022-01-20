@@ -9,10 +9,10 @@ from typing import Any, Dict, Iterable, List, Tuple, TypeVar
 from PIL import Image
 from kraken import blla
 from page.elements import PcGts, Page, Metadata, Region, Point
-from page.elements import Line, TextRegion
+from page.elements import Line, TextRegion, RegionRefIndexed
 from page.elements.coords import Coordinates, Baseline
-from page.constants import DEFAULT_NAMESPACE_MAP
-from lxml import etree
+from page.elements.reading_order import ReadingOrder
+from page.elements.reading_order.ordered_group import OrderedGroup
 
 T = TypeVar("T")
 
@@ -145,17 +145,21 @@ def segment_facsimile(
         "segment_facsimiles.py", now, now,
         "Generated using Kraken baseline segmentation."
     )
+
+    regions = segmentation_to_regions(segmentation)
+
+    region_refs: List[str] = [
+        RegionRefIndexed(r.region_id, i) for i, r in enumerate(regions)
+    ]
+    ordered_group = OrderedGroup("ro1", region_refs, "Region reading order")
+    reading_order = ReadingOrder(ordered_group)
+
     page = Page(
         (bin_img.width, bin_img.height), bin_path.name,
-        segmentation_to_regions(segmentation)
+        reading_order, regions
     )
     pcgts = PcGts(None, metadata, page)
-    pcgts_xml = pcgts.to_element(DEFAULT_NAMESPACE_MAP)
-
-    pagexml_path = parent_dir / "bin" / f"{fac_name}.seg.xml"
-    with pagexml_path.open("wb") as file:
-        print(f"Writing {pagexml_path}...")
-        file.write(etree.tostring(pcgts_xml, pretty_print=True))
+    pcgts.save_to_file(parent_dir / "bin" / f"{fac_name}.xml")
 
 
 def segment_facsimiles(
