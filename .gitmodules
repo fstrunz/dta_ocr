@@ -4,3 +4,6 @@
 [submodule "page-py"]
 	path = page-py
 	url = git@github.com:fstrunz/page-py.git
+[submodule "calamari_models_experimental"]
+	path = calamari_models_experimental
+	url = git@github.com:Calamari-OCR/calamari_models_experimental.git
