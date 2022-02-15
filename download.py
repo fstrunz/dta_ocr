@@ -130,9 +130,9 @@ async def write_facsimile_to_download_list(
 
 
 async def find_pending_facsimiles(
-    http: aiohttp.ClientSession, download_list_db: Path, corpus_path: Path
+    http: aiohttp.ClientSession, progress_db: Path, corpus_path: Path
 ) -> List[Facsimile]:
-    async with aiosqlite.connect(download_list_db) as db:
+    async with aiosqlite.connect(progress_db) as db:
         print("Collecting DTA dirnames from TEI files...")
         dta_dirnames = [
             await dirname_from_tei(path) for path in corpus_path.iterdir()
@@ -348,12 +348,10 @@ async def main():
         )
     )
     arg_parser.add_argument(
-        "--download-list", dest="download_list", default="downloaded.db",
+        "--progress-file", dest="progress_file", default="progress.db",
         help=(
-            "The location of a SQLite database which stores which " +
-            "facsimiles have already been successfully downloaded. This is " +
-            "used for resuming the download after an intentional or " +
-            "unintentional disruption.\n" +
+            "The location of a SQLite database which stores the progress " +
+            "the dta_ocr scripts have made.\n" +
             "The database will be created if it does not exist!"
         )
     )
@@ -367,9 +365,9 @@ async def main():
     output_path = Path(args.output_dir)
     output_path.mkdir(exist_ok=True)
 
-    download_list_db = Path(args.download_list)
+    progress_db = Path(args.progress_file)
 
-    async with aiosqlite.connect(download_list_db) as db:
+    async with aiosqlite.connect(progress_db) as db:
         await create_download_list_tables(db)
 
         async with db.execute(
@@ -395,7 +393,7 @@ async def main():
 
         async with aiohttp.ClientSession() as http:
             pending = await find_pending_facsimiles(
-                http, download_list_db, corpus_path
+                http, progress_db, corpus_path
             )
 
         tasks = collections.deque(pending)

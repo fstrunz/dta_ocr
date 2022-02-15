@@ -137,8 +137,8 @@ def segment_facsimile(
         return
 
     print(f"Segmenting {bin_path}...")
-    bin_img = Image.open(bin_path)
-    segmentation = blla.segment(bin_img)
+    with Image.open(bin_path) as bin_img:
+        segmentation = blla.segment(bin_img)
 
     now = datetime.now()
     metadata = Metadata(

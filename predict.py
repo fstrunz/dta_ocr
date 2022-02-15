@@ -1,18 +1,21 @@
-from typing import Iterable, Tuple, List
+from typing import Iterable, List
 from pathlib import Path
 import argparse
-
 from calamari_ocr.ocr.predict.predictor import MultiPredictor
 
 
-def segmentations(facsimile_path: Path) -> Iterable[Tuple[Path, Path]]:
+def documents(facsimile_path: Path) -> Iterable[Path]:
     for doc_path in facsimile_path.iterdir():
         if doc_path.is_dir():
-            bin_path = doc_path / "bin"
-            if bin_path.is_dir():
-                for seg_path in bin_path.iterdir():
-                    if seg_path.is_file() and seg_path.name.endswith(".xml"):
-                        yield seg_path, doc_path
+            yield doc_path
+
+
+def segmentations(doc_path: Path) -> Iterable[Path]:
+    bin_path = doc_path / "bin"
+    if bin_path.is_dir():
+        for seg_path in bin_path.iterdir():
+            if seg_path.is_file() and seg_path.name.endswith(".xml"):
+                yield seg_path
 
 
 def create_predictor(model_path: Path) -> MultiPredictor:
@@ -26,8 +29,11 @@ def create_predictor(model_path: Path) -> MultiPredictor:
 
 
 def predict(facsimile_path: Path, antiqua_path: Path, fraktur_path: Path):
+    # docs = list(documents(facsimile_path))
+
     # antiqua_pred = create_predictor(antiqua_path)
     # fraktur_pred = create_predictor(fraktur_path)
+
     pass
 
 
@@ -56,6 +62,10 @@ def main():
         "--fraktur-dir", dest="fraktur_dir",
         default="./calamari_models_experimental/deep3_fraktur-hist",
         help="The path of the Fraktur model directory to use for prediction."
+    )
+    arg_parser.add_argument(
+        "--corpus-dir", dest="corpus_dir", required=True,
+        help="The directory the full DTA corpus was extracted to."
     )
 
     args = arg_parser.parse_args()
