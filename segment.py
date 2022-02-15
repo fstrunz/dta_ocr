@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple, TypeVar, Optional
 from PIL import Image
 from kraken import blla
+from lxml import etree
 from page.elements import PcGts, Page, Metadata, Region, Point
 from page.elements import Line, TextRegion, RegionRefIndexed
 from page.elements.coords import Coordinates, Baseline
@@ -188,6 +189,42 @@ def segment_facsimiles_kraken(
         segment_facsimile_kraken(fac_path)
 
 
+# segmentation-pytorch does not output Metadata tags,
+# which strict PAGE-XML parsers do not like. this inserts
+# such a tag
+def fix_segmentation_xml(fac_path: Path):
+    xml_path = fac_path.parent / f"{fac_path.stem}.xml"
+    print(f"Fixing up {xml_path}...")
+
+    with xml_path.open("r") as file:
+        tree = etree.parse(file)
+
+    pcgts_xml = tree.getroot()
+    nsmap = pcgts_xml.nsmap
+
+    now = datetime.now()
+    metadata_xml = etree.Element("Metadata", nsmap=nsmap)
+
+    creator_xml = etree.SubElement(metadata_xml, "Creator")
+    creator_xml.text = "segment.py"
+
+    created_xml = etree.SubElement(metadata_xml, "Created")
+    created_xml.text = now.isoformat()
+
+    lastchange_xml = etree.SubElement(metadata_xml, "LastChange")
+    lastchange_xml.text = now.isoformat()
+
+    comments_xml = etree.SubElement(metadata_xml, "Comments")
+    comments_xml.text = "Generated using segmentation-pytorch."
+
+    pcgts_xml.insert(0, metadata_xml)
+
+    new_xml = etree.tostring(pcgts_xml, pretty_print=True)
+
+    with xml_path.open("wb") as file:
+        file.write(new_xml)
+
+
 def segment_facsimile_i6(
     inp: Tuple[Path, Path], predictor: Predictor, pool: multiprocessing.Pool
 ):
@@ -195,23 +232,25 @@ def segment_facsimile_i6(
     print(f"Segmenting {fac_path}...")
 
     img = SourceImage.load(fac_path)
+    img.pil_image = img.pil_image.convert("RGB")
+
     prediction, scaled_image = predictor.predict_image(img, process_pool=pool)
     layout_settings = LayoutProcessingSettings(
         marginalia_postprocessing=False,
         source_scale=True,
-        layout_method=LayoutProcessingMethod.LINES_ONLY
+        layout_method=LayoutProcessingMethod.FULL
     )
 
     analysed_content = process_layout(
         prediction, scaled_image, pool, layout_settings
     )
-    analysed_content.to_pagexml_space(prediction.prediction_scale_factor)
+    analysed_content = analysed_content.to_pagexml_space(prediction.prediction_scale_factor)
     xml_gen = analysed_content.export(
         scaled_image, fac_path, simplified_xml=False
     )
 
-    output_path = parent_dir / "bin"
-    xml_gen.save_textregions_as_xml(str(output_path.absolute()))
+    xml_gen.save_textregions_as_xml(str(parent_dir.absolute()))
+    fix_segmentation_xml(fac_path)
 
 
 def segment_facsimiles_i6(
