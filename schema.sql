@@ -1,0 +1,46 @@
+CREATE TABLE IF NOT EXISTS documents (
+    dta_dirname TEXT PRIMARY KEY,
+    page_count INTEGER CHECK ( page_count >= 0 ) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS facsimiles (
+    dta_dirname TEXT NOT NULL,
+    page_number INTEGER CHECK ( page_number >= 1 ),
+    status TEXT CHECK(
+        status IN ( 'pending', 'error', 'finished' )
+    ) NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT '0',
+    error_msg TEXT CHECK (
+        ( status = 'error' AND error_msg IS NOT NULL ) OR
+        ( status != 'error' AND error_msg IS NULL )
+    ),
+    dta_url TEXT NOT NULL,
+    hires_url TEXT,
+    PRIMARY KEY ( dta_dirname, page_number ),
+    FOREIGN KEY ( dta_dirname )
+        REFERENCES documents ( dta_dirname )
+            ON DELETE CASCADE
+            ON UPDATE NO ACTION
+);
+
+CREATE TABLE IF NOT EXISTS segmentations (
+    dta_dirname TEXT NOT NULL,
+    page_number INTEGER CHECK ( page_number >= 1 ),
+    segmenter TEXT CHECK(
+        segmenter IN ( 'kraken', 'segmentation-pytorch' )
+    ) NOT NULL,
+    file_path TEXT NOT NULL,
+    status TEXT CHECK(
+        status IN ( 'pending', 'error', 'finished' )
+    ) NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT '0',
+    error_msg TEXT CHECK (
+        ( status = 'error' AND error_msg IS NOT NULL ) OR
+        ( status != 'error' AND error_msg IS NULL )
+    ),
+    PRIMARY KEY ( dta_dirname, page_number ),
+    FOREIGN KEY ( dta_dirname, page_number )
+        REFERENCES facsimiles ( dta_dirname, page_number )
+            ON DELETE CASCADE
+            ON UPDATE NO ACTION
+);

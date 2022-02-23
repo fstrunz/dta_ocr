@@ -244,7 +244,9 @@ def segment_facsimile_i6(
     analysed_content = process_layout(
         prediction, scaled_image, pool, layout_settings
     )
-    analysed_content = analysed_content.to_pagexml_space(prediction.prediction_scale_factor)
+    analysed_content = analysed_content.to_pagexml_space(
+        prediction.prediction_scale_factor
+    )
     xml_gen = analysed_content.export(
         scaled_image, fac_path, simplified_xml=False
     )
@@ -329,6 +331,14 @@ def main():
         help=(
             "The model path for segmentation-pytorch. Required when " +
             "'--segmenter i6' is specified."
+        )
+    )
+    arg_parser.add_argument(
+        "--progress-file", dest="progress_file", default="progress.db",
+        help=(
+            "The location of a SQLite database which stores the progress " +
+            "the dta_ocr scripts have made.\n" +
+            "The database will be created if it does not exist!"
         )
     )
     args = arg_parser.parse_args()

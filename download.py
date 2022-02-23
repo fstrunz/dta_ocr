@@ -289,36 +289,10 @@ async def download_facsimile(
         return None
 
 
-async def create_download_list_tables(db: aiosqlite.Connection):
-    await db.execute(
-        """CREATE TABLE IF NOT EXISTS documents (
-            dta_dirname TEXT PRIMARY KEY,
-            page_count INTEGER CHECK ( page_count >= 0 ) NOT NULL
-        );"""
-    )
-    await db.execute(
-        """CREATE TABLE IF NOT EXISTS facsimiles (
-            dta_dirname TEXT NOT NULL,
-            page_number INTEGER CHECK ( page_number >= 1 ),
-            status TEXT CHECK(
-                status IN ( 'pending', 'error', 'finished' )
-            ) NOT NULL,
-            attempts INTEGER NOT NULL DEFAULT '0',
-            error_msg TEXT CHECK (
-                ( status = 'error' AND error_msg IS NOT NULL ) OR
-                ( status != 'error' AND error_msg IS NULL )
-            ),
-            dta_url TEXT NOT NULL,
-            hires_url TEXT,
-            PRIMARY KEY ( dta_dirname, page_number ),
-            FOREIGN KEY ( dta_dirname )
-                REFERENCES documents ( dta_dirname )
-                    ON DELETE CASCADE
-                    ON UPDATE NO ACTION,
-            UNIQUE ( dta_dirname, page_number )
-        );"""
-    )
-    await db.commit()
+async def create_progress_schema(db: aiosqlite.Connection):
+    with open("schema.sql") as schema:
+        await db.executescript(schema.read())
+        await db.commit()
 
 
 async def main():
@@ -368,7 +342,7 @@ async def main():
     progress_db = Path(args.progress_file)
 
     async with aiosqlite.connect(progress_db) as db:
-        await create_download_list_tables(db)
+        await create_progress_schema(db)
 
         async with db.execute(
             """SELECT COUNT(dta_dirname) FROM facsimiles
