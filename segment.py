@@ -1,10 +1,12 @@
 import argparse
-from datetime import datetime
 import multiprocessing
 import subprocess
 import os
 import itertools
 import torch
+import sqlite3
+from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple, TypeVar, Optional
 from PIL import Image
@@ -58,8 +60,73 @@ def facsimiles(facsimile_path: Path) -> Iterable[Tuple[Path, Path]]:
                     yield fac_path, doc_path
 
 
+def schedule_downloaded_facsimiles(conn: sqlite3.Connection):
+    print("Scheduling downloaded facsimiles for segmentation...")
+    cursor = conn.execute(
+        """SELECT dta_dirname, page_number FROM facsimiles
+        WHERE status = 'finished'"""
+    )
+
+    conn.executemany(
+        """INSERT OR IGNORE INTO segmentations
+            ( dta_dirname, page_number, segmenter,
+            model_path, file_path, status,
+            attempts, error_msg )
+        VALUES
+            ( ?, ?, NULL, NULL, NULL, 'pending', 0, NULL )""",
+        cursor
+    )
+
+    conn.commit()
+
+
+@dataclass
+class Facsimile:
+    dta_dirname: str
+    page_number: int
+
+    def path(self, facsimile_path: Path) -> Path:
+        return (
+            facsimile_path / self.dta_dirname / f"{str(self.page_number)}.jpg"
+        )
+
+
+def scheduled_facsimiles(
+    conn: sqlite3.Connection
+) -> Iterable[Facsimile]:
+    print("Fetching scheduled facsimiles...")
+    cursor = conn.execute(
+        """SELECT dta_dirname, page_number FROM segmentations
+        WHERE status != 'finished'
+        ORDER BY dta_dirname, page_number"""
+    )
+
+    return (Facsimile(d, p) for d, p in cursor)
+
+
+def save_segmented_facsimile(
+    conn: sqlite3.Connection, facsimile: Facsimile,
+    segmenter: str, model_path: Optional[Path], seg_path: Path
+):
+    conn.execute(
+        """UPDATE segmentations
+        SET status = 'finished',
+            segmenter = ?,
+            model_path = ?,
+            file_path = ?,
+            attempts = attempts + 1
+        WHERE dta_dirname = ? AND page_number = ?;
+        """,
+        (
+            segmenter, None if model_path is None else str(model_path),
+            str(seg_path), facsimile.dta_dirname, facsimile.page_number
+        )
+    )
+    conn.commit()
+
+
 def binarise_facsimile_chunk(
-    ocropy_venv: Path, chunk_paths: List[Path], process_count: int
+    ocropy_venv: Path, chunk_paths: List[Path]
 ) -> bool:
     python_path = (ocropy_venv / "bin" / "python").resolve()
     nlbin_path = (ocropy_venv / "bin" / "ocropus-nlbin").resolve()
@@ -108,7 +175,7 @@ def binarise_facsimiles(
     with multiprocessing.Pool(process_count) as pool:
         pool.starmap(
             binarise_facsimile_chunk,
-            ((ocropy_venv, chunk, process_count) for chunk in chunked(
+            ((ocropy_venv, chunk) for chunk in chunked(
                 (fac for fac, _ in facsimiles(facsimile_path)),
                 facsimile_count // process_count
             ))
@@ -150,9 +217,9 @@ def find_binarisation_path(fac_path: Path, parent_dir: Path) -> Optional[Path]:
 
 
 def segment_facsimile_kraken(
-    inp: Tuple[Path, Path]
+    conn: sqlite3.Connection, fac: Facsimile, fac_path: Path
 ):
-    fac_path, parent_dir = inp
+    parent_dir = fac_path.parent
     fac_name = fac_path.stem
     bin_path = find_binarisation_path(fac_path, parent_dir)
 
@@ -179,21 +246,26 @@ def segment_facsimile_kraken(
         reading_order, regions
     )
     pcgts = PcGts(None, metadata, page)
-    pcgts.save_to_file(parent_dir / "bin" / f"{fac_name}.xml")
+
+    seg_file = parent_dir / "bin" / f"{fac_name}.xml"
+    pcgts.save_to_file(seg_file)
+    save_segmented_facsimile(
+        conn, fac, "kraken", None, seg_file
+    )
 
 
 def segment_facsimiles_kraken(
-    facsimile_path: Path
+    conn: sqlite3.Connection, facsimile_path: Path,
+    facsimiles: List[Facsimile]
 ):
-    for fac_path in facsimiles(facsimile_path):
-        segment_facsimile_kraken(fac_path)
+    for fac in facsimiles:
+        segment_facsimile_kraken(conn, fac, fac.path(facsimile_path))
 
 
 # segmentation-pytorch does not output Metadata tags,
 # which strict PAGE-XML parsers do not like. this inserts
 # such a tag
-def fix_segmentation_xml(fac_path: Path):
-    xml_path = fac_path.parent / f"{fac_path.stem}.xml"
+def fix_segmentation_xml(xml_path: Path):
     print(f"Fixing up {xml_path}...")
 
     with xml_path.open("r") as file:
@@ -226,9 +298,9 @@ def fix_segmentation_xml(fac_path: Path):
 
 
 def segment_facsimile_i6(
-    inp: Tuple[Path, Path], predictor: Predictor, pool: multiprocessing.Pool
+    conn: sqlite3.Connection, fac_path: Path, predictor: Predictor,
+    pool: multiprocessing.Pool, fac: Facsimile, model_path: Path
 ):
-    fac_path, parent_dir = inp
     print(f"Segmenting {fac_path}...")
 
     img = SourceImage.load(fac_path)
@@ -251,12 +323,17 @@ def segment_facsimile_i6(
         scaled_image, fac_path, simplified_xml=False
     )
 
-    xml_gen.save_textregions_as_xml(str(parent_dir.absolute()))
-    fix_segmentation_xml(fac_path)
+    xml_gen.save_textregions_as_xml(str(fac_path.parent))
+    xml_path = fac_path.parent / f"{fac_path.stem}.xml"
+    fix_segmentation_xml(xml_path)
+    save_segmented_facsimile(
+        conn, fac, "segmentation-pytorch", model_path, xml_path
+    )
 
 
 def segment_facsimiles_i6(
-    facsimile_path: Path, model_path: Path, process_count: int
+    conn: sqlite3.Connection, facsimile_path: Path, model_path: Path,
+    process_count: int, facsimiles: List[Facsimile]
 ):
     print("Setting up predictor...")
     settings = PredictionSettings([model_path], 1000000, None, None)
@@ -266,23 +343,39 @@ def segment_facsimiles_i6(
         torch.set_num_threads(process_count)
 
     with multiprocessing.Pool(process_count) as pool:
-        for fac_path in facsimiles(facsimile_path):
-            segment_facsimile_i6(fac_path, predictor, pool)
+        for fac in facsimiles:
+            segment_facsimile_i6(
+                conn, fac.path(facsimile_path), predictor, pool,
+                fac, model_path
+            )
 
 
-def preprocess_facsimiles(
+def segment_facsimiles(
+    conn: sqlite3.Connection,
     facsimile_path: Path, process_count: int, ocropy_venv: Optional[Path],
-    segmenter: str, model_path: Path
+    segmenter: str, model_path: Path, facsimiles: List[Facsimile]
 ):
     print("Segmenting facsimiles...")
 
     if segmenter == "kraken":
         print("Binarising facsimiles with OCRopus...")
-        binarise_facsimiles(ocropy_venv, facsimile_path, process_count)
-        segment_facsimiles_kraken(facsimile_path, process_count)
+        binarise_facsimiles(
+            ocropy_venv, facsimile_path, process_count, facsimiles
+        )
+        segment_facsimiles_kraken(conn, facsimile_path, facsimiles)
     elif segmenter == "i6":
         # This segmenter automatically does binarisation
-        segment_facsimiles_i6(facsimile_path, model_path, process_count)
+        segment_facsimiles_i6(
+            conn,
+            facsimile_path, model_path, process_count, facsimiles
+        )
+
+
+def create_progress_schema(conn: sqlite3.Connection):
+    with open("schema.sql", "r") as schema:
+        conn.executescript(schema.read())
+
+    conn.commit()
 
 
 def main():
@@ -389,10 +482,25 @@ def main():
         print("Given facsimile directory is not a directory!")
         exit(1)
 
-    preprocess_facsimiles(
-        facsimile_path, args.process_count, ocropy_venv,
-        args.segmenter, model_path
-    )
+    progress_path = Path(args.progress_file)
+    if progress_path.exists() and not progress_path.is_file():
+        print("Given progress file is not a file!")
+        exit(1)
+
+    with sqlite3.connect(str(progress_path)) as conn:
+        create_progress_schema(conn)
+        schedule_downloaded_facsimiles(conn)
+
+        sched = list(scheduled_facsimiles(conn))
+        while sched:
+            segment_facsimiles(
+                conn,
+                facsimile_path, args.process_count, ocropy_venv,
+                args.segmenter, model_path, sched
+            )
+
+            schedule_downloaded_facsimiles(conn)
+            sched = list(scheduled_facsimiles(conn))
 
 
 if __name__ == "__main__":

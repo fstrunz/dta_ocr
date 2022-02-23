@@ -290,7 +290,7 @@ async def download_facsimile(
 
 
 async def create_progress_schema(db: aiosqlite.Connection):
-    with open("schema.sql") as schema:
+    with open("schema.sql", "r") as schema:
         await db.executescript(schema.read())
         await db.commit()
 
