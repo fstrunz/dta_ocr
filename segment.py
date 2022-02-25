@@ -5,6 +5,7 @@ import os
 import itertools
 import torch
 import sqlite3
+import time
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -492,15 +493,20 @@ def main():
         schedule_downloaded_facsimiles(conn)
 
         sched = list(scheduled_facsimiles(conn))
-        while sched:
-            segment_facsimiles(
-                conn,
-                facsimile_path, args.process_count, ocropy_venv,
-                args.segmenter, model_path, sched
-            )
+        while True:
+            if sched:
+                segment_facsimiles(
+                    conn,
+                    facsimile_path, args.process_count, ocropy_venv,
+                    args.segmenter, model_path, sched
+                )
 
-            schedule_downloaded_facsimiles(conn)
-            sched = list(scheduled_facsimiles(conn))
+                schedule_downloaded_facsimiles(conn)
+                sched = list(scheduled_facsimiles(conn))
+            else:
+                print("Nothing to do. Waiting for work...")
+                # Pause the thread so we don't waste CPU cycles waiting
+                time.sleep(10.0)
 
 
 if __name__ == "__main__":
