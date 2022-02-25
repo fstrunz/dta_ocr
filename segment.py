@@ -500,13 +500,13 @@ def main():
                     facsimile_path, args.process_count, ocropy_venv,
                     args.segmenter, model_path, sched
                 )
-
-                schedule_downloaded_facsimiles(conn)
-                sched = list(scheduled_facsimiles(conn))
             else:
                 print("Nothing to do. Waiting for work...")
                 # Pause the thread so we don't waste CPU cycles waiting
                 time.sleep(10.0)
+
+            schedule_downloaded_facsimiles(conn)
+            sched = list(scheduled_facsimiles(conn))
 
 
 if __name__ == "__main__":

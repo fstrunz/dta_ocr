@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS documents (
     dta_dirname TEXT PRIMARY KEY,
-    page_count INTEGER CHECK ( page_count >= 0 ) NOT NULL
+    page_count INTEGER CHECK ( page_count >= 0 ) NOT NULL,
+    tei_path TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS facsimiles (

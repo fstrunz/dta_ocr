@@ -95,7 +95,8 @@ async def find_available_facsimiles(
 
 
 async def write_facsimile_to_download_list(
-    http: aiohttp.ClientSession, db: aiosqlite.Connection, dta_dirname: str
+    http: aiohttp.ClientSession, db: aiosqlite.Connection,
+    dta_dirname: str, tei_path: Path
 ):
     cursor = await db.execute(
         "SELECT page_count FROM documents WHERE dta_dirname = ?",
@@ -109,8 +110,9 @@ async def write_facsimile_to_download_list(
         )
 
         await db.execute(
-            """INSERT OR IGNORE INTO documents ( dta_dirname, page_count )
-            VALUES ( ?, ? );""", [dta_dirname, len(facsimiles)]
+            """INSERT OR IGNORE INTO documents ( dta_dirname, page_count, tei_path )
+            VALUES ( ?, ?, ? );""",
+            (dta_dirname, len(facsimiles), str(tei_path))
         )
 
         for facsimile in facsimiles:
@@ -121,9 +123,9 @@ async def write_facsimile_to_download_list(
                     dta_url, hires_url )
                 VALUES
                     ( ?, ?, ?, ?, NULL, ?, ? );""",
-                [dta_dirname, facsimile.page_num, "pending",
+                (dta_dirname, facsimile.page_num, "pending",
                     facsimile.attempts, facsimile.dta_url,
-                    facsimile.hires_url]
+                    facsimile.hires_url)
             )
 
         await db.commit()
@@ -135,13 +137,14 @@ async def find_pending_facsimiles(
     async with aiosqlite.connect(progress_db) as db:
         print("Collecting DTA dirnames from TEI files...")
         dta_dirnames = [
-            await dirname_from_tei(path) for path in corpus_path.iterdir()
-            if path.is_file() and path.name.endswith(".TEI-P5.xml")
+            (await dirname_from_tei(path), path)
+            for path in corpus_path.iterdir()
+            if path.is_file() and path.suffixes == [".TEI-P5", ".xml"]
         ]
 
         for f in asyncio.as_completed([
-            write_facsimile_to_download_list(http, db, dta_dirname)
-            for dta_dirname in dta_dirnames
+            write_facsimile_to_download_list(http, db, dta_dirname, tei_path)
+            for dta_dirname, tei_path in dta_dirnames
             if dta_dirname is not None
         ]):
             try:

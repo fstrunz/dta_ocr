@@ -4,20 +4,6 @@ import argparse
 from calamari_ocr.ocr.predict.predictor import MultiPredictor
 
 
-def documents(facsimile_path: Path) -> Iterable[Path]:
-    for doc_path in facsimile_path.iterdir():
-        if doc_path.is_dir():
-            yield doc_path
-
-
-def segmentations(doc_path: Path) -> Iterable[Path]:
-    bin_path = doc_path / "bin"
-    if bin_path.is_dir():
-        for seg_path in bin_path.iterdir():
-            if seg_path.is_file() and seg_path.name.endswith(".xml"):
-                yield seg_path
-
-
 def create_predictor(model_path: Path) -> MultiPredictor:
     checkpoints: List[str] = [
         model_path / model_file.stem
@@ -29,10 +15,10 @@ def create_predictor(model_path: Path) -> MultiPredictor:
 
 
 def predict(facsimile_path: Path, antiqua_path: Path, fraktur_path: Path):
-    # docs = list(documents(facsimile_path))
+    docs = list(documents(facsimile_path))
 
-    # antiqua_pred = create_predictor(antiqua_path)
-    # fraktur_pred = create_predictor(fraktur_path)
+    antiqua_pred = create_predictor(antiqua_path)
+    fraktur_pred = create_predictor(fraktur_path)
 
     pass
 
