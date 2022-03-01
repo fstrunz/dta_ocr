@@ -1,8 +1,11 @@
 .vscode/
 venv/
 *.db
+*.db-shm
+*.db-wal
 *.mlmodel
 *.pronn
+__pycache__/
 
 # DTA Corpus
 dta_komplett_*/

@@ -1,25 +1,72 @@
-from typing import Iterable, List
-from pathlib import Path
 import argparse
+import sqlite3
+import time
+from enum import Enum
+from dataclasses import dataclass
+from typing import List
+from pathlib import Path
 from calamari_ocr.ocr.predict.predictor import MultiPredictor
+from dta_ocr import create_progress_schema
 
 
 def create_predictor(model_path: Path) -> MultiPredictor:
     checkpoints: List[str] = [
-        model_path / model_file.stem
+        str(model_path / model_file.stem)
         for model_file in model_path.iterdir()
-        if model_file.isfile() and model_file.suffix == ".json"
+        if model_file.is_file() and model_file.suffix == ".json"
     ]
 
     return MultiPredictor.from_paths(checkpoints)
 
 
-def predict(facsimile_path: Path, antiqua_path: Path, fraktur_path: Path):
-    docs = list(documents(facsimile_path))
+def schedule_segmented_documents(conn: sqlite3.Connection):
+    seg_cursor = conn.execute(
+        """SELECT dta_dirname, page_number FROM segmentations
+        WHERE status = 'finished'
+        ORDER BY dta_dirname, page_number"""
+    )
 
-    antiqua_pred = create_predictor(antiqua_path)
-    fraktur_pred = create_predictor(fraktur_path)
+    conn.executemany(
+        """INSERT OR IGNORE INTO predictions (
+            dta_dirname, page_number, prediction_path, status
+        ) VALUES ( ?, ?, NULL, 'pending' )""",
+        seg_cursor
+    )
 
+    conn.commit()
+    seg_cursor.close()
+
+
+class Typeface(Enum):
+    ANTIQUA = "Antiqua"
+    FRAKTUR = "Fraktur"
+
+
+@dataclass
+class Prediction:
+    dta_dirname: str
+    page_number: int
+    tei_path: Path
+
+
+def fetch_scheduled_predictions(conn: sqlite3.Connection) -> List[Prediction]:
+    pred_cursor = conn.execute(
+        """SELECT dta_dirname, page_number, tei_path
+        FROM predictions pred
+        NATURAL JOIN documents doc
+        WHERE pred.status != 'finished'"""
+    )
+
+    return [
+        Prediction(dta_dirname, page_number, tei_path)
+        for dta_dirname, page_number, tei_path in pred_cursor
+    ]
+
+
+def predict(
+    facsimile_path: Path, antiqua_pred: MultiPredictor,
+    fraktur_pred: MultiPredictor, scheduled: List[Prediction]
+):
     pass
 
 
@@ -40,18 +87,22 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--antiqua-ckpt", dest="antiqua_dir",
-        default="./calamari_models_experimental/deep3_antiqua-hist/4.ckpt",
+        "--antiqua-dir", dest="antiqua_dir",
+        default="./models/prediction/antiqua",
         help="The path of the Antiqua model directory to use for prediction."
     )
     arg_parser.add_argument(
         "--fraktur-dir", dest="fraktur_dir",
-        default="./calamari_models_experimental/deep3_fraktur-hist",
+        default="./models/prediction/fraktur",
         help="The path of the Fraktur model directory to use for prediction."
     )
     arg_parser.add_argument(
-        "--corpus-dir", dest="corpus_dir", required=True,
-        help="The directory the full DTA corpus was extracted to."
+        "--progress-file", dest="progress_file", default="progress.db",
+        help=(
+            "The location of a SQLite database which stores the progress " +
+            "the dta_ocr scripts have made.\n" +
+            "The database will be created if it does not exist!"
+        )
     )
 
     args = arg_parser.parse_args()
@@ -62,23 +113,40 @@ def main():
         )
         exit(1)
 
-    antiqua_path = Path(args.antiqua_ckpt)
+    antiqua_path = Path(args.antiqua_dir)
     if not antiqua_path.is_dir():
         print(
-            f"The given Antiqua checkpoint ({antiqua_path}) is not a " +
+            f"The given Antiqua path ({antiqua_path}) is not a " +
             "directory!"
         )
         exit(1)
 
-    fraktur_path = Path(args.fraktur_ckpt)
+    fraktur_path = Path(args.fraktur_dir)
     if not fraktur_path.is_dir():
         print(
-            f"The given Fraktur checkpoint ({fraktur_path}) is not a " +
+            f"The given Fraktur path ({fraktur_path}) is not a " +
             "directory!"
         )
         exit(1)
 
-    predict(facsimile_path, antiqua_path, fraktur_path)
+    print("Loading predictors...")
+    antiqua_pred = create_predictor(antiqua_path)
+    fraktur_pred = create_predictor(fraktur_path)
+
+    with sqlite3.connect(args.progress_file) as conn:
+        create_progress_schema(conn)
+        schedule_segmented_documents(conn)
+
+        sched = list(fetch_scheduled_predictions(conn))
+        while True:
+            if sched:
+                predict(facsimile_path, antiqua_pred, fraktur_pred, sched)
+            else:
+                print("No work to be done. Waiting for more segmentations...")
+                time.sleep(10.0)
+
+            schedule_segmented_documents(conn)
+            sched = list(fetch_scheduled_predictions(conn))
 
 
 if __name__ == "__main__":

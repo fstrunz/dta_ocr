@@ -1,6 +1,6 @@
 [submodule "external/calamari_models_experimental"]
 	path = external/calamari_models_experimental
-	url = git@github.com:Calamari-OCR/calamari_models_experimental.git
+	url = git@github.com:fstrunz/calamari_models_experimental.git
 [submodule "external/page-py"]
 	path = external/page-py
 	url = git@github.com:fstrunz/page-py

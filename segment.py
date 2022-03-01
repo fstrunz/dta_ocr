@@ -24,6 +24,7 @@ from segmentation.predictors import PredictionSettings, Predictor
 from segmentation.scripts.layout import (
     process_layout, LayoutProcessingSettings
 )
+from dta_ocr import create_progress_schema
 
 T = TypeVar("T")
 
@@ -71,10 +72,9 @@ def schedule_downloaded_facsimiles(conn: sqlite3.Connection):
     conn.executemany(
         """INSERT OR IGNORE INTO segmentations
             ( dta_dirname, page_number, segmenter,
-            model_path, file_path, status,
-            attempts, error_msg )
+            model_path, file_path, status )
         VALUES
-            ( ?, ?, NULL, NULL, NULL, 'pending', 0, NULL )""",
+            ( ?, ?, NULL, NULL, NULL, 'pending' )""",
         cursor
     )
 
@@ -114,8 +114,7 @@ def save_segmented_facsimile(
         SET status = 'finished',
             segmenter = ?,
             model_path = ?,
-            file_path = ?,
-            attempts = attempts + 1
+            file_path = ?
         WHERE dta_dirname = ? AND page_number = ?;
         """,
         (
@@ -361,7 +360,7 @@ def segment_facsimiles(
     if segmenter == "kraken":
         print("Binarising facsimiles with OCRopus...")
         binarise_facsimiles(
-            ocropy_venv, facsimile_path, process_count, facsimiles
+            ocropy_venv, facsimile_path, process_count
         )
         segment_facsimiles_kraken(conn, facsimile_path, facsimiles)
     elif segmenter == "i6":
@@ -370,13 +369,6 @@ def segment_facsimiles(
             conn,
             facsimile_path, model_path, process_count, facsimiles
         )
-
-
-def create_progress_schema(conn: sqlite3.Connection):
-    with open("schema.sql", "r") as schema:
-        conn.executescript(schema.read())
-
-    conn.commit()
 
 
 def main():
@@ -466,6 +458,7 @@ def main():
             exit(1)
 
     if args.model_path is None:
+        model_path = None
         if args.segmenter == "i6":
             print(
                 "A model path must be specified when using " +
