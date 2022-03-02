@@ -92,9 +92,12 @@ def fetch_scheduled_predictions(conn: sqlite3.Connection) -> List[Prediction]:
 
 
 def predict(
-    facsimile_path: Path, antiqua_pred: MultiPredictor,
-    fraktur_pred: MultiPredictor, scheduled: List[Prediction]
+    facsimile_path: Path, antiqua_path: Path,
+    fraktur_path: Path, scheduled: List[Prediction]
 ) -> List[Path]:
+    antiqua_pred: MultiPredictor = create_predictor(antiqua_path)
+    fraktur_pred: MultiPredictor = create_predictor(fraktur_path)
+    
     xml_files_f = [
         str(sched.seg_path) for sched in scheduled
         if sched.typeface == Typeface.Fraktur
@@ -138,14 +141,14 @@ def predict(
     if len(reader_f) > 0:
         for s in do_pred_f:
             _, (_, pred), meta = s.inputs, s.outputs, s.meta
-            reader_f.store_text_prediction(pred, meta["id"])
+            reader_f.store_text_prediction(pred, meta["id"], None)
 
         reader_f.store()
 
     if len(reader_a) > 0:
         for s in do_pred_a:
             _, (_, pred), meta = s.inputs, s.outputs, s.meta
-            reader_a.store_text_prediction(pred, meta["id"])
+            reader_a.store_text_prediction(pred, meta["id"], None)
 
         reader_a.store()
 
@@ -209,10 +212,6 @@ def main():
         )
         exit(1)
 
-    print("Loading predictors...")
-    antiqua_pred = create_predictor(antiqua_path)
-    fraktur_pred = create_predictor(fraktur_path)
-
     with sqlite3.connect(args.progress_file) as conn:
         create_progress_schema(conn)
         schedule_segmented_documents(conn)
@@ -220,27 +219,28 @@ def main():
         sched = list(fetch_scheduled_predictions(conn))
         while True:
             if sched:
-                try:
-                    predict(facsimile_path, antiqua_pred, fraktur_pred, sched)
-                except Exception:
-                    print("Scheduled predictions failed...")
-                else:
-                    conn.executemany(
-                        """UPDATE predictions
-                        SET status = 'finished',
-                            prediction_path = ?
-                        WHERE dta_dirname = ?
-                        AND page_number = ?""",
-                        [
-                            (
-                                str(s.seg_path.parent /
-                                    f"{s.seg_path.stem}.pred.xml"),
-                                sched.dta_dirname,
-                                sched.page_number
-                            ) for s in sched
-                        ]
+                predict(facsimile_path, antiqua_path, fraktur_path, sched)
+
+                # Compute the corresponding output files that Calamari
+                # has hopefully produced and write these into the database.
+                conn.executemany(
+                    """UPDATE predictions
+                    SET status = 'finished',
+                        prediction_path = ?
+                    WHERE dta_dirname = ?
+                    AND page_number = ?""",
+                    (
+                        (
+                            str(
+                                s.seg_path.parent /
+                                f"{s.seg_path.stem}.pred.xml"
+                            ),
+                            s.dta_dirname,
+                            s.page_number
+                        ) for s in sched
                     )
-                    conn.commit()
+                )
+                conn.commit()
             else:
                 print("No work to be done. Waiting for more segmentations...")
                 time.sleep(10.0)
