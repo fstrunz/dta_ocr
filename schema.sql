@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     ),
     status TEXT CHECK (
         status IN ( 'pending', 'error', 'finished' )
-    ),
+    ) NOT NULL,
     PRIMARY KEY ( dta_dirname, page_number ),
     FOREIGN KEY ( dta_dirname, page_number )
         REFERENCES segmentations ( dta_dirname, page_number )
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS predictions (
             ON UPDATE NO ACTION
 );
 
-/*CREATE TABLE IF NOT EXISTS matchings (
+CREATE TABLE IF NOT EXISTS matchings (
     dta_dirname TEXT NOT NULL,
     page_number INTEGER CHECK ( page_number >= 1 ) NOT NULL,
     gt_path TEXT CHECK (
@@ -78,16 +78,16 @@ CREATE TABLE IF NOT EXISTS predictions (
     ),
     status TEXT CHECK (
         status IN ( 'pending', 'error', 'finished' )
-    ),
+    ) NOT NULL,
     PRIMARY KEY ( dta_dirname, page_number ),
     FOREIGN KEY ( dta_dirname, page_number )
-        REFERENCES predictions ( dta_dirname )
+        REFERENCES predictions ( dta_dirname, page_number )
             ON DELETE CASCADE
             ON UPDATE NO ACTION
-);*/
+);
 
 CREATE UNIQUE INDEX IF NOT EXISTS documents_pkey_index ON documents ( dta_dirname );
 CREATE UNIQUE INDEX IF NOT EXISTS facsimiles_pkey_index ON facsimiles ( dta_dirname, page_number );
 CREATE UNIQUE INDEX IF NOT EXISTS segmentations_pkey_index ON segmentations ( dta_dirname, page_number );
 CREATE UNIQUE INDEX IF NOT EXISTS predictions_pkey_index ON predictions ( dta_dirname, page_number );
-/* CREATE UNIQUE INDEX IF NOT EXISTS matchings_pkey_index ON matchings ( dta_dirname, page_number ); */
+CREATE UNIQUE INDEX IF NOT EXISTS matchings_pkey_index ON matchings ( dta_dirname, page_number );
