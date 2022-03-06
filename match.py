@@ -1,4 +1,6 @@
 import argparse
+import sqlite3
+from dta_ocr import create_progress_schema
 
 
 def main():
@@ -18,7 +20,10 @@ def main():
             "The database will be created if it does not exist!"
         )
     )
-    # args = arg_parser.parse_args()
+    args = arg_parser.parse_args()
+
+    with sqlite3.connect(args.progress_file) as conn:
+        create_progress_schema(conn)
 
 
 if __name__ == "__main__":

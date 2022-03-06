@@ -6,4 +6,4 @@
 	url = git@github.com:fstrunz/page-py
 [submodule "external/segmentation-pytorch"]
 	path = external/segmentation-pytorch
-	url = https://gitlab2.informatik.uni-wuerzburg.de/nof36hn/segmentation-pytorch.git
+	url = https://gitlab2.informatik.uni-wuerzburg.de/s372379/segmentation-pytorch.git

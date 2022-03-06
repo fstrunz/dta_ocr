@@ -97,7 +97,7 @@ def predict(
 ) -> List[Path]:
     antiqua_pred: MultiPredictor = create_predictor(antiqua_path)
     fraktur_pred: MultiPredictor = create_predictor(fraktur_path)
-    
+
     xml_files_f = [
         str(sched.seg_path) for sched in scheduled
         if sched.typeface == Typeface.Fraktur

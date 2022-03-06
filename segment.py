@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple, TypeVar, Optional
 from PIL import Image
 from kraken import blla
-from lxml import etree
 from page.elements import PcGts, Page, Metadata, Region, Point
 from page.elements import Line, TextRegion, RegionRefIndexed
 from page.elements.coords import Coordinates, Baseline
@@ -262,41 +261,6 @@ def segment_facsimiles_kraken(
         segment_facsimile_kraken(conn, fac, fac.path(facsimile_path))
 
 
-# segmentation-pytorch does not output Metadata tags,
-# which strict PAGE-XML parsers do not like. this inserts
-# such a tag
-def fix_segmentation_xml(xml_path: Path):
-    print(f"Fixing up {xml_path}...")
-
-    with xml_path.open("r") as file:
-        tree = etree.parse(file)
-
-    pcgts_xml = tree.getroot()
-    nsmap = pcgts_xml.nsmap
-
-    now = datetime.now()
-    metadata_xml = etree.Element("Metadata", nsmap=nsmap)
-
-    creator_xml = etree.SubElement(metadata_xml, "Creator")
-    creator_xml.text = "segment.py"
-
-    created_xml = etree.SubElement(metadata_xml, "Created")
-    created_xml.text = now.isoformat()
-
-    lastchange_xml = etree.SubElement(metadata_xml, "LastChange")
-    lastchange_xml.text = now.isoformat()
-
-    comments_xml = etree.SubElement(metadata_xml, "Comments")
-    comments_xml.text = "Generated using segmentation-pytorch."
-
-    pcgts_xml.insert(0, metadata_xml)
-
-    new_xml = etree.tostring(pcgts_xml, pretty_print=True)
-
-    with xml_path.open("wb") as file:
-        file.write(new_xml)
-
-
 def segment_facsimile_i6(
     conn: sqlite3.Connection, fac_path: Path, predictor: Predictor,
     pool: multiprocessing.Pool, fac: Facsimile, model_path: Path
@@ -325,7 +289,6 @@ def segment_facsimile_i6(
 
     xml_gen.save_textregions_as_xml(str(fac_path.parent))
     xml_path = fac_path.parent / f"{fac_path.stem}.xml"
-    fix_segmentation_xml(xml_path)
     save_segmented_facsimile(
         conn, fac, "segmentation-pytorch", model_path, xml_path
     )
