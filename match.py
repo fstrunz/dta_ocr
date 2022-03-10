@@ -1,10 +1,13 @@
 import argparse
 import sqlite3
+import difflib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
-from dta_ocr import create_progress_schema
-from tei_reader import TeiReader
+from bs4 import BeautifulSoup
+# from fuzzysearch import find_near_matches
+# from dta_ocr import create_progress_schema
+from dta_ocr.dta_tei_parser import DTADocument
 from page.elements import PcGts, TextRegion
 
 
@@ -48,7 +51,20 @@ def fetch_scheduled_matchings(conn: sqlite3.Connection) -> List[Matching]:
     ]
 
 
-def match(matching: Matching):
+# given a single line from PRED and the entirety of GT,
+# returns the corresponding line in GT
+def correct_line_with_gt(line: str, gt: str) -> str:
+    matcher = difflib.SequenceMatcher(None, line, gt)
+
+    for match in matcher.get_matching_blocks():
+        print(gt[match.b:match.b+match.size])
+
+    # TODO: Implement.
+    return ""
+
+
+# given a scheduled matching, compute the new GT lines
+def match(matching: Matching) -> List[str]:
     with matching.pred_path.open("r") as file:
         pcgts = PcGts.from_file(file)
 
@@ -61,9 +77,11 @@ def match(matching: Matching):
         if line.text is not None
     ]
 
-    tei_reader = TeiReader()
-    tei = tei_reader.read_file(str(matching.tei_path))
-    gt_text: str = tei.text
+    gt_text = ""
+
+    return [
+        correct_line_with_gt(line, gt_text) for line in pred_lines
+    ]
 
 
 def main():
@@ -83,10 +101,24 @@ def main():
             "The database will be created if it does not exist!"
         )
     )
-    args = arg_parser.parse_args()
+    # args = arg_parser.parse_args()
 
-    with sqlite3.connect(args.progress_file) as conn:
-        create_progress_schema(conn)
+    with open(
+        "dta_komplett_2021-05-13/davidis_kochbuch_1879.TEI-P5.xml", "r"
+    ) as file:
+        soup = BeautifulSoup(file, "lxml")
+
+    dta_doc = DTADocument.from_tei_soup(soup)
+    print(dta_doc.get_page_text(14))
+
+    # matches = find_near_matches(
+    #    "Wie man Speiſevorräthe am beſten gut friſch erhalten",
+    #     test.text,
+    #     max_l_dist=4
+    # )
+
+    # with sqlite3.connect(args.progress_file) as conn:
+    #    create_progress_schema(conn)
 
 
 if __name__ == "__main__":
