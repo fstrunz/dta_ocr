@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 from bs4 import BeautifulSoup
-# from fuzzysearch import find_near_matches
+from fuzzysearch import find_near_matches
 # from dta_ocr import create_progress_schema
 from dta_ocr.dta_tei_parser import DTADocument
 from page.elements import PcGts, TextRegion
@@ -109,13 +109,15 @@ def main():
         soup = BeautifulSoup(file, "lxml")
 
     dta_doc = DTADocument.from_tei_soup(soup)
-    print(dta_doc.get_page_text(14))
+    print(dta_doc.get_page_text(8))
 
-    # matches = find_near_matches(
-    #    "Wie man Speiſevorräthe am beſten gut friſch erhalten",
-    #     test.text,
-    #     max_l_dist=4
-    # )
+    matches = find_near_matches(
+        "Ueberfluſſes, des Verſchwendens iſt vorüber, ſ o l l t e wenigſtens",
+        dta_doc.get_page_text(8),
+        max_l_dist=15
+    )
+
+    print(matches)
 
     # with sqlite3.connect(args.progress_file) as conn:
     #    create_progress_schema(conn)
