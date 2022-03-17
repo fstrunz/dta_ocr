@@ -5,6 +5,7 @@ venv/
 *.db-wal
 *.mlmodel
 *.pronn
+*.csv
 __pycache__/
 
 # DTA Corpus

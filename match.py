@@ -1,20 +1,24 @@
 import argparse
+from difflib import Match
 import sqlite3
-import difflib
+import fuzzysearch
+import math
+import functools
+import time
+import csv
+from Levenshtein import distance
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
-from fuzzysearch import find_near_matches
-# from dta_ocr import create_progress_schema
+from dta_ocr import create_progress_schema
 from dta_ocr.dta_tei_parser import DTADocument
 from page.elements import PcGts, TextRegion
 
 
 def schedule_matchings(conn: sqlite3.Connection):
     cursor = conn.execute(
-        """SELECT dta_dirname, page_number
-        FROM predictions
+        """SELECT dta_dirname, page_number FROM predictions
         WHERE status = 'finished'"""
     )
 
@@ -36,13 +40,15 @@ class Matching:
     tei_path: Path
 
 
-def fetch_scheduled_matchings(conn: sqlite3.Connection) -> List[Matching]:
+def fetch_scheduled_matchings(
+    conn: sqlite3.Connection, only_finished: bool = True
+) -> List[Matching]:
     cursor = conn.execute(
-        """SELECT m.dta_dirname, m.page_number, p.prediction_path, d.tei_path
+        f"""SELECT m.dta_dirname, m.page_number, p.prediction_path, d.tei_path
         FROM matchings m
-        NATURAL JOIN predictions p
+        JOIN predictions p ON m.dta_dirname = p.dta_dirname
         JOIN documents d ON m.dta_dirname = d.dta_dirname
-        WHERE m.status != 'finished'
+        {"WHERE m.status != 'finished'" if only_finished else ""}
         ORDER BY m.dta_dirname, m.page_number"""
     )
     return [
@@ -51,37 +57,100 @@ def fetch_scheduled_matchings(conn: sqlite3.Connection) -> List[Matching]:
     ]
 
 
-# given a single line from PRED and the entirety of GT,
+# given a single line from PRED and the corresponding page GT,
 # returns the corresponding line in GT
-def correct_line_with_gt(line: str, gt: str) -> str:
-    matcher = difflib.SequenceMatcher(None, line, gt)
+def correct_line_with_gt(
+    line: str, gt: str, max_norm_lev: float
+) -> Optional[str]:
+    if not line:
+        return None
 
-    for match in matcher.get_matching_blocks():
-        print(gt[match.b:match.b+match.size])
+    max_lev: int = max(0, math.floor(max_norm_lev * len(gt)))
+    print(f"Correcting line {line} with max_lev={max_lev}...")
+    matches = fuzzysearch.find_near_matches(
+        line, gt, max_l_dist=max_lev
+    )
+    if not matches:
+        # not found in GT
+        return None
 
-    # TODO: Implement.
-    return ""
+    print(f"==> {matches[0].matched}")
+    return matches[0].matched
+
+
+@functools.lru_cache(maxsize=16)
+def load_dta_doc(tei_path: Path) -> DTADocument:
+    with tei_path.open("r") as file:
+        soup = BeautifulSoup(file, "lxml")
+
+    return DTADocument.from_tei_soup(soup)
 
 
 # given a scheduled matching, compute the new GT lines
-def match(matching: Matching) -> List[str]:
-    with matching.pred_path.open("r") as file:
-        pcgts = PcGts.from_file(file)
+def match(
+    matching: Matching, max_norm_lev: float
+) -> Tuple[str, str]:
+    if matching.pred_path.is_file():
+        with matching.pred_path.open("r") as file:
+            pcgts = PcGts.from_file(file)
 
-    page = pcgts.page
-    pred_lines: List[str] = [
-        line.unicode
-        for region in page.regions
-        if isinstance(region, TextRegion)
-        for line in region.lines
-        if line.text is not None
-    ]
+        page = pcgts.page
+        pred_lines: List[str] = [
+            line.text.unicode
+            for region in page.regions
+            if isinstance(region, TextRegion)
+            for line in region.lines
+            if line.text is not None
+        ]
+    else:
+        pred_lines = []
 
-    gt_text = ""
+    doc = load_dta_doc(matching.tei_path)
+    gt_text = doc.get_page_text(matching.page_number)
+    print(pred_lines)
 
-    return [
-        correct_line_with_gt(line, gt_text) for line in pred_lines
-    ]
+    pred_text = "\n".join(
+        correct_line_with_gt(line, gt_text, max_norm_lev) or ""
+        for line in pred_lines
+    )
+
+    return pred_text, gt_text
+
+
+@dataclass
+class EvalRow:
+    time_taken: float
+    max_norm_lev: float
+    norm_lev: float
+
+
+def evaluate(
+    matching: Matching, lev_step: float, max_norm_lev_max: float
+) -> List[EvalRow]:
+    max_norm_lev = 0.0
+    eval_rows: List[EvalRow] = []
+
+    while max_norm_lev <= max_norm_lev_max:
+        start_time = time.perf_counter()
+        pred, gt = match(matching, max_norm_lev)
+        end_time = time.perf_counter()
+
+        norm_lev = distance(pred, gt) / len(gt)
+
+        eval_rows.append(
+            EvalRow(end_time - start_time, max_norm_lev, norm_lev)
+        )
+
+        max_norm_lev += lev_step
+
+    return eval_rows
+
+
+def perform_scheduled_matchings(
+    db: sqlite3.Connection, scheduled: List[Matching]
+):
+    for matching in scheduled:
+        pass
 
 
 def main():
@@ -101,26 +170,53 @@ def main():
             "The database will be created if it does not exist!"
         )
     )
-    # args = arg_parser.parse_args()
-
-    with open(
-        "dta_komplett_2021-05-13/davidis_kochbuch_1879.TEI-P5.xml", "r"
-    ) as file:
-        soup = BeautifulSoup(file, "lxml")
-
-    dta_doc = DTADocument.from_tei_soup(soup)
-    print(dta_doc.get_page_text(8))
-
-    matches = find_near_matches(
-        "Ueberfluſſes, des Verſchwendens iſt vorüber, ſ o l l t e wenigſtens",
-        dta_doc.get_page_text(8),
-        max_l_dist=15
+    arg_parser.add_argument(
+        "--max-norm-lev", dest="max_norm_lev", default=0.0045
     )
+    arg_parser.add_argument(
+        "--evaluate", action="store_true"
+    )
+    arg_parser.add_argument(
+        "--eval-step", dest="lev_step", type=float, default=0.001
+    )
+    arg_parser.add_argument(
+        "--eval-max-norm-lev-max", dest="max_norm_lev_max", default=0.005
+    )
+    args = arg_parser.parse_args()
 
-    print(matches)
+    with sqlite3.connect(args.progress_file) as conn:
+        create_progress_schema(conn)
+        schedule_matchings(conn)
 
-    # with sqlite3.connect(args.progress_file) as conn:
-    #    create_progress_schema(conn)
+        if args.evaluate:
+            matchings = fetch_scheduled_matchings(conn, False)
+            lev_step = args.lev_step
+
+            with open("evaluation.csv", "w") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow([
+                    "dta_dirname", "page_number",
+                    "max_norm_lev", "norm_lev", "time_taken"
+                ])
+                for matching in matchings:
+                    for row in evaluate(
+                        matching, lev_step, args.max_norm_lev_max
+                    ):
+                        writer.writerow([
+                            matching.dta_dirname, matching.page_number,
+                            row.max_norm_lev, row.norm_lev, row.time_taken
+                        ])
+        else:
+            while True:
+                scheduled = fetch_scheduled_matchings(conn)
+
+                if scheduled:
+                    perform_scheduled_matchings(conn, scheduled)
+                else:
+                    print("No matchings scheduled. Waiting for work...")
+                    time.sleep(10.0)
+
+                schedule_matchings(conn)
 
 
 if __name__ == "__main__":
