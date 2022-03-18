@@ -1,19 +1,17 @@
 import argparse
-from difflib import Match
 import sqlite3
 import fuzzysearch
 import math
 import functools
 import time
-import csv
-from Levenshtein import distance
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Dict, Tuple
 from bs4 import BeautifulSoup
 from dta_ocr import create_progress_schema
 from dta_ocr.dta_tei_parser import DTADocument
-from page.elements import PcGts, TextRegion
+from page.elements import PcGts, TextRegion, Line, Coordinates, Text, Baseline
 
 
 def schedule_matchings(conn: sqlite3.Connection):
@@ -66,7 +64,6 @@ def correct_line_with_gt(
         return None
 
     max_lev: int = max(0, math.floor(max_norm_lev * len(gt)))
-    print(f"Correcting line {line} with max_lev={max_lev}...")
     matches = fuzzysearch.find_near_matches(
         line, gt, max_l_dist=max_lev
     )
@@ -74,7 +71,6 @@ def correct_line_with_gt(
         # not found in GT
         return None
 
-    print(f"==> {matches[0].matched}")
     return matches[0].matched
 
 
@@ -89,39 +85,94 @@ def load_dta_doc(tei_path: Path) -> DTADocument:
 # given a scheduled matching, compute the new GT lines
 def match(
     matching: Matching, max_norm_lev: float
-) -> Tuple[str, str]:
+) -> Dict[str, str]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
             pcgts = PcGts.from_file(file)
 
         page = pcgts.page
-        pred_lines: List[str] = [
-            line.text.unicode
+        pred_lines: List[Line] = [
+            line
             for region in page.regions
             if isinstance(region, TextRegion)
             for line in region.lines
             if line.text is not None
         ]
     else:
-        pred_lines = []
+        pred_lines: List[Line] = []
 
     doc = load_dta_doc(matching.tei_path)
     gt_text = doc.get_page_text(matching.page_number)
-    print(pred_lines)
 
-    pred_text = "\n".join(
-        correct_line_with_gt(line, gt_text, max_norm_lev) or ""
+    gt_lines = {
+        line.line_id: correct_line_with_gt(
+            line.text.unicode, gt_text, max_norm_lev
+        )
         for line in pred_lines
-    )
+    }
 
-    return pred_text, gt_text
+    return gt_lines
+
+
+def write_lines_to_pagexml(
+    lines: Dict[str, str], original: PcGts, path: Path
+):
+    original.metadata.last_change = datetime.now()
+    page = original.page
+
+    pred_coords: Dict[str, Tuple[Coordinates, Optional[Baseline]]] = {
+        line.line_id: (line.coords, line.baseline)
+        for region in page.regions
+        if isinstance(region, TextRegion)
+        for line in region.lines
+    }
+    page.regions = []
+
+    region_id = 0
+    for line_id, line_text in lines.items():
+        line = Line(
+            line_id, pred_coords[line_id][0], pred_coords[line_id][1],
+            Text(None, line_text, None)
+        )
+        page.regions.append(TextRegion(
+            f"r{region_id}", pred_coords[line_id][0],
+            [], None, [line]
+        ))
+        region_id += 1
+
+    original.save_to_file(path)
+
+
+# Path("abc.pred.xml").stem will yield "abc.pred".
+# innermost_stem produces "abc" instead
+def innermost_stem(path: Path) -> Path:
+    path_stem = path.stem
+
+    while path.suffixes:
+        path = Path(path_stem)
+        path_stem = path.stem
+
+    return path_stem
 
 
 def perform_scheduled_matchings(
-    db: sqlite3.Connection, scheduled: List[Matching]
+    db: sqlite3.Connection, scheduled: List[Matching], max_norm_lev: float
 ):
     for matching in scheduled:
-        pass
+        gt_lines = match(matching, max_norm_lev)
+
+        if not matching.pred_path.is_file():
+            print(f"Warning: Path {matching.pred_path} is not a file.")
+            continue
+
+        with matching.pred_path.open("r") as file:
+            pcgts = PcGts.from_file(file)
+
+        write_lines_to_pagexml(
+            gt_lines, pcgts,
+            matching.pred_path.parent /
+            f"{innermost_stem(matching.pred_path)}.gt.xml"
+        )
 
 
 def main():
@@ -142,7 +193,7 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--max-norm-lev", dest="max_norm_lev", default=0.0045
+        "--max-norm-lev", dest="max_norm_lev", type=float, default=0.0045
     )
     args = arg_parser.parse_args()
 
@@ -154,7 +205,7 @@ def main():
             scheduled = fetch_scheduled_matchings(conn)
 
             if scheduled:
-                perform_scheduled_matchings(conn, scheduled)
+                perform_scheduled_matchings(conn, scheduled, args.max_norm_lev)
             else:
                 print("No matchings scheduled. Waiting for work...")
                 time.sleep(10.0)
