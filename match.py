@@ -117,35 +117,6 @@ def match(
     return pred_text, gt_text
 
 
-@dataclass
-class EvalRow:
-    time_taken: float
-    max_norm_lev: float
-    norm_lev: float
-
-
-def evaluate(
-    matching: Matching, lev_step: float, max_norm_lev_max: float
-) -> List[EvalRow]:
-    max_norm_lev = 0.0
-    eval_rows: List[EvalRow] = []
-
-    while max_norm_lev <= max_norm_lev_max:
-        start_time = time.perf_counter()
-        pred, gt = match(matching, max_norm_lev)
-        end_time = time.perf_counter()
-
-        norm_lev = distance(pred, gt) / len(gt)
-
-        eval_rows.append(
-            EvalRow(end_time - start_time, max_norm_lev, norm_lev)
-        )
-
-        max_norm_lev += lev_step
-
-    return eval_rows
-
-
 def perform_scheduled_matchings(
     db: sqlite3.Connection, scheduled: List[Matching]
 ):
@@ -173,50 +144,22 @@ def main():
     arg_parser.add_argument(
         "--max-norm-lev", dest="max_norm_lev", default=0.0045
     )
-    arg_parser.add_argument(
-        "--evaluate", action="store_true"
-    )
-    arg_parser.add_argument(
-        "--eval-step", dest="lev_step", type=float, default=0.001
-    )
-    arg_parser.add_argument(
-        "--eval-max-norm-lev-max", dest="max_norm_lev_max", default=0.005
-    )
     args = arg_parser.parse_args()
 
     with sqlite3.connect(args.progress_file) as conn:
         create_progress_schema(conn)
         schedule_matchings(conn)
 
-        if args.evaluate:
-            matchings = fetch_scheduled_matchings(conn, False)
-            lev_step = args.lev_step
+        while True:
+            scheduled = fetch_scheduled_matchings(conn)
 
-            with open("evaluation.csv", "w") as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow([
-                    "dta_dirname", "page_number",
-                    "max_norm_lev", "norm_lev", "time_taken"
-                ])
-                for matching in matchings:
-                    for row in evaluate(
-                        matching, lev_step, args.max_norm_lev_max
-                    ):
-                        writer.writerow([
-                            matching.dta_dirname, matching.page_number,
-                            row.max_norm_lev, row.norm_lev, row.time_taken
-                        ])
-        else:
-            while True:
-                scheduled = fetch_scheduled_matchings(conn)
+            if scheduled:
+                perform_scheduled_matchings(conn, scheduled)
+            else:
+                print("No matchings scheduled. Waiting for work...")
+                time.sleep(10.0)
 
-                if scheduled:
-                    perform_scheduled_matchings(conn, scheduled)
-                else:
-                    print("No matchings scheduled. Waiting for work...")
-                    time.sleep(10.0)
-
-                schedule_matchings(conn)
+            schedule_matchings(conn)
 
 
 if __name__ == "__main__":
