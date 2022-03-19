@@ -58,7 +58,7 @@ class Prediction:
 
     def __post_init__(self):
         try:
-            with self.tei_path.open("r") as tei_file:
+            with self.tei_path.open("r", encoding="utf8") as tei_file:
                 tree = etree.parse(tei_file)
 
             root_xml: etree.ElementBase = tree.getroot()
