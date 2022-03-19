@@ -32,14 +32,15 @@ def schedule_segmented_documents(conn: sqlite3.Connection):
         ORDER BY dta_dirname, page_number"""
     )
 
-    conn.executemany(
-        """INSERT OR IGNORE INTO predictions (
-            dta_dirname, page_number, prediction_path, status
-        ) VALUES ( ?, ?, NULL, 'pending' )""",
-        seg_cursor
-    )
+    for dta_dirname, page_number in seg_cursor:
+        conn.execute(
+            """INSERT OR IGNORE INTO predictions (
+                dta_dirname, page_number, prediction_path, status
+            ) VALUES ( ?, ?, NULL, 'pending' )""",
+            (dta_dirname, page_number)
+        )
+        conn.commit()
 
-    conn.commit()
     seg_cursor.close()
 
 
