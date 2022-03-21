@@ -1,9 +1,9 @@
 [submodule "external/calamari_models_experimental"]
 	path = external/calamari_models_experimental
-	url = git@github.com:fstrunz/calamari_models_experimental.git
+	url = https://github.com/fstrunz/calamari_models_experimental.git
 [submodule "external/page-py"]
 	path = external/page-py
-	url = git@github.com:fstrunz/page-py
+	url = https://github.com/fstrunz/page-py.git
 [submodule "external/segmentation-pytorch"]
 	path = external/segmentation-pytorch
 	url = https://gitlab2.informatik.uni-wuerzburg.de/s372379/segmentation-pytorch.git
