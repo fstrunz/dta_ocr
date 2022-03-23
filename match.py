@@ -57,24 +57,21 @@ def fetch_scheduled_matchings(
 # given a single line from PRED and the corresponding page GT,
 # returns the corresponding line in GT
 def correct_line_with_gt(
-    line: str, gt_lines: List[str], cutoff: float
+    line: str, gt_lines: List[str], cutoff: int
 ) -> Optional[str]:
     if not line:
         return None
 
     matches = []
     for gt_line in gt_lines:
-        matches += fuzzysearch.find_near_matches(line, gt_line, max_l_dist=10)
+        matches += fuzzysearch.find_near_matches(
+            line, gt_line, max_l_dist=cutoff
+        )
 
-    # print(f"Candidates: {gt_lines}")
     if matches:
         best_match: fuzzysearch.Match = min(matches, key=lambda m: m.dist)
-        # print(f"{line} --> {best_match.matched}")
-        # print()
         return best_match.matched
     else:
-        # print(f"{line} --> No match.")
-        # print()
         return None
 
 
@@ -88,7 +85,7 @@ def load_dta_doc(tei_path: Path) -> DTADocument:
 
 # given a scheduled matching, compute the new GT lines
 def match(
-    matching: Matching, cutoff: float
+    matching: Matching, cutoff: int
 ) -> Dict[str, str]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
@@ -207,7 +204,7 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--cutoff", dest="cutoff", type=float, default=0.4
+        "--cutoff", dest="cutoff", type=int, default=10
     )
     args = arg_parser.parse_args()
 
