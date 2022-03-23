@@ -35,14 +35,22 @@ class TEIParser:
         facs: Optional[int] = None
     ) -> int:
         if isinstance(node, Tag):
-            if node.name == "pb":
+            if node.name == "pb":  # page boundary
                 facs = int(PB_REGEX.match(node["facs"]).group(1))
                 pages[facs] = DTAPage(facs, "")
+            elif node.name == "lb":  # line break
+                pages[facs].text += "\n"
             else:
                 for child in node:
                     facs = self.__find_text(child, pages, facs)
         elif isinstance(node, NavigableString) and facs is not None:
-            pages[facs].text += f"{str(node.strip())} "
+            text = str(node.strip())
+            if node.parent.name == "p":
+                text += "\n"
+            else:
+                text += " "
+
+            pages[facs].text += text
 
         return facs
 

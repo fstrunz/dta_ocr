@@ -1,8 +1,7 @@
 import argparse
 import sqlite3
-import fuzzysearch
-import math
 import functools
+import fuzzysearch
 import time
 from datetime import datetime
 from dataclasses import dataclass
@@ -42,7 +41,7 @@ def fetch_scheduled_matchings(
     conn: sqlite3.Connection, only_finished: bool = True
 ) -> List[Matching]:
     cursor = conn.execute(
-        f"""SELECT m.dta_dirname, m.page_number, p.prediction_path, d.tei_path
+        f"""SELECT DISTINCT m.dta_dirname, p.page_number, p.prediction_path, d.tei_path
         FROM matchings m
         JOIN predictions p ON m.dta_dirname = p.dta_dirname
         JOIN documents d ON m.dta_dirname = d.dta_dirname
@@ -58,20 +57,25 @@ def fetch_scheduled_matchings(
 # given a single line from PRED and the corresponding page GT,
 # returns the corresponding line in GT
 def correct_line_with_gt(
-    line: str, gt: str, max_norm_lev: float
+    line: str, gt_lines: List[str], cutoff: float
 ) -> Optional[str]:
     if not line:
         return None
 
-    max_lev: int = max(0, math.floor(max_norm_lev * len(gt)))
-    matches = fuzzysearch.find_near_matches(
-        line, gt, max_l_dist=max_lev
-    )
-    if not matches:
-        # not found in GT
-        return None
+    matches = []
+    for gt_line in gt_lines:
+        matches += fuzzysearch.find_near_matches(line, gt_line, max_l_dist=10)
 
-    return matches[0].matched
+    # print(f"Candidates: {gt_lines}")
+    if matches:
+        best_match: fuzzysearch.Match = min(matches, key=lambda m: m.dist)
+        # print(f"{line} --> {best_match.matched}")
+        # print()
+        return best_match.matched
+    else:
+        # print(f"{line} --> No match.")
+        # print()
+        return None
 
 
 @functools.lru_cache(maxsize=16)
@@ -84,7 +88,7 @@ def load_dta_doc(tei_path: Path) -> DTADocument:
 
 # given a scheduled matching, compute the new GT lines
 def match(
-    matching: Matching, max_norm_lev: float
+    matching: Matching, cutoff: float
 ) -> Dict[str, str]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
@@ -101,17 +105,26 @@ def match(
     else:
         pred_lines: List[Line] = []
 
+    print("===============================")
+    print(f"MATCHING {matching.dta_dirname} page {matching.page_number}")
+    print("===============================")
+
     doc = load_dta_doc(matching.tei_path)
     gt_text = doc.get_page_text(matching.page_number)
+    print(f"Ground Truth text:\n{gt_text}")
 
-    gt_lines = {
+    gt_lines = [
+        gt_line.strip() for gt_line in gt_text.split("\n") if gt_line.strip()
+    ]
+
+    corrected_lines = {
         line.line_id: correct_line_with_gt(
-            line.text.unicode, gt_text, max_norm_lev
+            line.text.unicode, gt_lines, cutoff
         )
         for line in pred_lines
     }
 
-    return gt_lines
+    return corrected_lines
 
 
 def write_lines_to_pagexml(
@@ -140,6 +153,7 @@ def write_lines_to_pagexml(
         ))
         region_id += 1
 
+    page.reading_order = None
     original.save_to_file(path)
 
 
@@ -193,7 +207,7 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--max-norm-lev", dest="max_norm_lev", type=float, default=0.0045
+        "--cutoff", dest="cutoff", type=float, default=0.4
     )
     args = arg_parser.parse_args()
 
@@ -202,10 +216,11 @@ def main():
         schedule_matchings(conn)
 
         while True:
-            scheduled = fetch_scheduled_matchings(conn)
+            scheduled = fetch_scheduled_matchings(conn, False)
+            print(scheduled)
 
             if scheduled:
-                perform_scheduled_matchings(conn, scheduled, args.max_norm_lev)
+                perform_scheduled_matchings(conn, scheduled, args.cutoff)
             else:
                 print("No matchings scheduled. Waiting for work...")
                 time.sleep(10.0)

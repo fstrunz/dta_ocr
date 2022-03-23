@@ -10,4 +10,5 @@ __pycache__/
 
 # DTA Corpus
 dta_komplett_*/
+dta_kernkorpus_*/
 facsimiles/
