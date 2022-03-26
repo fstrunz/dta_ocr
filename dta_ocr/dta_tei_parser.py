@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Optional, Union
 from bs4 import BeautifulSoup, Tag, NavigableString
+from dta_ocr.utils import intersperse
 
 PB_REGEX = re.compile(r"#f0*(\d+)")
 
@@ -45,8 +46,11 @@ class TEIParser:
                     facs = self.__find_text(child, pages, facs)
         elif isinstance(node, NavigableString) and facs is not None:
             text = str(node.strip())
-            if node.parent.name == "p":
+            if node.parent.name == "p":  # paragraph
                 text += "\n"
+            elif node.parent.name == "hi" and "#g" in node.parent["rendition"]:
+                # text has spaces between letters
+                text = intersperse(text, " ") + " "
             else:
                 text += " "
 

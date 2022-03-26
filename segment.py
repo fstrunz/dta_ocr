@@ -348,7 +348,7 @@ def main():
     arg_parser.add_argument(
         "--ocropy-venv", dest="ocropy_venv", default=None,
         help=(
-            "Path to a virtualenv containing a Python 2.7 install along with" +
+            "Path to a virtualenv containing a Python 2.7 install along with " +
             "the OCRopy binaries. Required when '--segmenter kraken' is given."
         )
     )

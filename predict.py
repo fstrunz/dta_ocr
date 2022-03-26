@@ -66,7 +66,10 @@ class Prediction:
             p_xml = root_xml.find(
                 ".//physDesc/typeDesc/p", namespaces=root_xml.nsmap
             )
-            self.typeface = Typeface[p_xml.text]
+            if "Antiqua" in p_xml.text:
+                self.typeface = Typeface.Antiqua
+            else:
+                self.typeface = Typeface.Fraktur
         except Exception:
             self.typeface = None
             raise RuntimeError(

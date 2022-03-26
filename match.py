@@ -204,7 +204,14 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--cutoff", dest="cutoff", type=int, default=10
+        "--cutoff", dest="cutoff", type=int, default=8,
+        help=(
+            "When matching, any substrings with a levenshtein distance " +
+            "of this parameter or higher will be discarded. Higher values " +
+            "allow more tolerance for mistakes in the prediction, but will " +
+            "take significantly longer to process! Allowing more mistakes " +
+            "also enables the possibility of matching unrelated strings."
+        )
     )
     args = arg_parser.parse_args()
 
@@ -214,7 +221,6 @@ def main():
 
         while True:
             scheduled = fetch_scheduled_matchings(conn, False)
-            print(scheduled)
 
             if scheduled:
                 perform_scheduled_matchings(conn, scheduled, args.cutoff)
