@@ -3,6 +3,7 @@ import sqlite3
 import functools
 import fuzzysearch
 import time
+import difflib
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,16 +55,14 @@ def fetch_scheduled_matchings(
     ]
 
 
-# given a single line from PRED and the corresponding page GT,
-# returns the corresponding line in GT
-def correct_line_with_gt(
-    line: str, gt_lines: List[str], cutoff: int
+def correct_line_with_gt_ext(
+    line: str, gt_segments: List[str], cutoff: int
 ) -> Optional[str]:
     if not line:
         return None
 
     matches = []
-    for gt_line in gt_lines:
+    for gt_line in gt_segments:
         matches += fuzzysearch.find_near_matches(
             line, gt_line, max_l_dist=cutoff
         )
@@ -73,6 +72,16 @@ def correct_line_with_gt(
         return best_match.matched
     else:
         return None
+
+
+def correct_line_with_gt(
+    line: str, gt_lines: List[str], cutoff: int
+) -> Optional[str]:
+    if not line:
+        return None
+
+    matches = difflib.get_close_matches(line, gt_lines, n=1, cutoff=cutoff)
+    return matches[0] if matches else None
 
 
 @functools.lru_cache(maxsize=16)
@@ -204,7 +213,7 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--cutoff", dest="cutoff", type=int, default=8,
+        "--cutoff", dest="cutoff", type=float, default=0.9,
         help=(
             "When matching, any substrings with a levenshtein distance " +
             "of this parameter or higher will be discarded. Higher values " +
