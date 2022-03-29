@@ -21,13 +21,16 @@ class DTADocument:
         return self.pages[facsimile].text
 
     @staticmethod
-    def from_tei_soup(soup: BeautifulSoup) -> Optional["DTADocument"]:
-        return TEIParser(soup).parse()
+    def from_tei_soup(
+        soup: BeautifulSoup, intersperse: bool = True
+    ) -> Optional["DTADocument"]:
+        return TEIParser(soup, intersperse).parse()
 
 
 class TEIParser:
-    def __init__(self, soup: BeautifulSoup):
+    def __init__(self, soup: BeautifulSoup, intersperse: bool = False):
         self.soup = soup
+        self.intersperse = intersperse
 
     # Given the text tag from a TEI document, recur through the
     # children and populate the pages dictionary.
@@ -48,7 +51,10 @@ class TEIParser:
             text = str(node.strip())
             if node.parent.name == "p":  # paragraph
                 text += "\n"
-            elif node.parent.name == "hi" and "#g" in node.parent["rendition"]:
+            elif (
+                self.intersperse and node.parent.name == "hi" and
+                "#g" in node.parent["rendition"]
+            ):
                 # text has spaces between letters
                 text = intersperse(text, " ") + " "
             else:

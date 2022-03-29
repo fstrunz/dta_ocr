@@ -7,7 +7,7 @@ import difflib
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Set
 from bs4 import BeautifulSoup
 from dta_ocr import create_progress_schema
 from dta_ocr.dta_tei_parser import DTADocument
@@ -56,7 +56,7 @@ def fetch_scheduled_matchings(
 
 
 def correct_line_with_gt_ext(
-    line: str, gt_segments: List[str], cutoff: int
+    line: str, gt_segments: Set[str], cutoff: float
 ) -> Optional[str]:
     if not line:
         return None
@@ -64,7 +64,7 @@ def correct_line_with_gt_ext(
     matches = []
     for gt_line in gt_segments:
         matches += fuzzysearch.find_near_matches(
-            line, gt_line, max_l_dist=cutoff
+            line, gt_line, max_l_dist=int(cutoff)
         )
 
     if matches:
@@ -75,26 +75,30 @@ def correct_line_with_gt_ext(
 
 
 def correct_line_with_gt(
-    line: str, gt_lines: List[str], cutoff: int
+    line: str, gt_lines: Set[str], cutoff: float
 ) -> Optional[str]:
     if not line:
         return None
 
     matches = difflib.get_close_matches(line, gt_lines, n=1, cutoff=cutoff)
-    return matches[0] if matches else None
+    if matches:
+        gt_lines.remove(matches[0])
+        return matches[0]
+    else:
+        return None
 
 
 @functools.lru_cache(maxsize=16)
-def load_dta_doc(tei_path: Path) -> DTADocument:
+def load_dta_doc(tei_path: Path, intersperse: bool = False) -> DTADocument:
     with tei_path.open("r") as file:
         soup = BeautifulSoup(file, "lxml")
 
-    return DTADocument.from_tei_soup(soup)
+    return DTADocument.from_tei_soup(soup, intersperse)
 
 
 # given a scheduled matching, compute the new GT lines
 def match(
-    matching: Matching, cutoff: int
+    matching: Matching, cutoff: float, intersperse: bool
 ) -> Dict[str, str]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
@@ -115,13 +119,13 @@ def match(
     print(f"MATCHING {matching.dta_dirname} page {matching.page_number}")
     print("===============================")
 
-    doc = load_dta_doc(matching.tei_path)
+    doc = load_dta_doc(matching.tei_path, intersperse=intersperse)
     gt_text = doc.get_page_text(matching.page_number)
-    print(f"Ground Truth text:\n{gt_text}")
 
-    gt_lines = [
+    gt_lines: Set[str] = {
         gt_line.strip() for gt_line in gt_text.split("\n") if gt_line.strip()
-    ]
+    }
+    print(f"Ground Truth lines:\n{gt_lines}")
 
     corrected_lines = {
         line.line_id: correct_line_with_gt(
@@ -149,6 +153,9 @@ def write_lines_to_pagexml(
 
     region_id = 0
     for line_id, line_text in lines.items():
+        if not line_text:
+            continue
+
         line = Line(
             line_id, pred_coords[line_id][0], pred_coords[line_id][1],
             Text(None, line_text, None)
@@ -176,10 +183,11 @@ def innermost_stem(path: Path) -> Path:
 
 
 def perform_scheduled_matchings(
-    db: sqlite3.Connection, scheduled: List[Matching], max_norm_lev: float
+    db: sqlite3.Connection, scheduled: List[Matching], cutoff: float,
+    intersperse: bool
 ):
     for matching in scheduled:
-        gt_lines = match(matching, max_norm_lev)
+        gt_lines = match(matching, cutoff, intersperse)
 
         if not matching.pred_path.is_file():
             print(f"Warning: Path {matching.pred_path} is not a file.")
@@ -213,13 +221,23 @@ def main():
         )
     )
     arg_parser.add_argument(
-        "--cutoff", dest="cutoff", type=float, default=0.9,
+        "--cutoff", dest="cutoff", type=float, default=0.8,
         help=(
             "When matching, any substrings with a levenshtein distance " +
             "of this parameter or higher will be discarded. Higher values " +
             "allow more tolerance for mistakes in the prediction, but will " +
             "take significantly longer to process! Allowing more mistakes " +
             "also enables the possibility of matching unrelated strings."
+        )
+    )
+    arg_parser.add_argument(
+        "--intersperse", dest="intersperse", action="store_true",
+        help=(
+            "In some texts, e m p h a s i s is placed on words by " +
+            "interspersing them with spaces. The prediction may or " +
+            "may not pick up on this. When this flag is given, " +
+            "the text in the TEI ground truth will be interspersed, " +
+            "or kept without spaces otherwise."
         )
     )
     args = arg_parser.parse_args()
@@ -232,7 +250,9 @@ def main():
             scheduled = fetch_scheduled_matchings(conn, False)
 
             if scheduled:
-                perform_scheduled_matchings(conn, scheduled, args.cutoff)
+                perform_scheduled_matchings(
+                    conn, scheduled, args.cutoff, args.intersperse
+                )
             else:
                 print("No matchings scheduled. Waiting for work...")
                 time.sleep(10.0)
