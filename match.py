@@ -135,9 +135,9 @@ def match(
     return {
         line_id: correction
         for line_id, correction in pool.starmap(
-            correct_line_with_gt, [
+            correct_line_with_gt, (
                 (line, gt_lines, cutoff) for line in pred_lines
-            ]
+            )
         )
     }
 
