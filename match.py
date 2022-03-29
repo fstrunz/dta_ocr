@@ -4,6 +4,7 @@ import functools
 import fuzzysearch
 import time
 import difflib
+import multiprocessing
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,17 +76,21 @@ def correct_line_with_gt_ext(
 
 
 def correct_line_with_gt(
-    line: str, gt_lines: Set[str], cutoff: float
-) -> Optional[str]:
-    if not line:
-        return None
+    line: Line, gt_lines: Set[str], cutoff: float
+) -> Optional[Tuple[str, str]]:
+    line_text = line.text.unicode
+    if not line_text:
+        return line.line_id, None
 
-    matches = difflib.get_close_matches(line, gt_lines, n=1, cutoff=cutoff)
+    matches = difflib.get_close_matches(
+        line_text, gt_lines, n=1, cutoff=cutoff
+    )
     if matches:
         gt_lines.remove(matches[0])
-        return matches[0]
+        print(f"{line_text} ===> {matches[0]}")
+        return line.line_id, matches[0]
     else:
-        return None
+        return line.line_id, None
 
 
 @functools.lru_cache(maxsize=16)
@@ -98,8 +103,9 @@ def load_dta_doc(tei_path: Path, intersperse: bool = False) -> DTADocument:
 
 # given a scheduled matching, compute the new GT lines
 def match(
-    matching: Matching, cutoff: float, intersperse: bool
-) -> Dict[str, str]:
+    matching: Matching, cutoff: float, intersperse: bool,
+    pool: multiprocessing.Pool
+) -> Dict[str, Optional[str]]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
             pcgts = PcGts.from_file(file)
@@ -125,16 +131,15 @@ def match(
     gt_lines: Set[str] = {
         gt_line.strip() for gt_line in gt_text.split("\n") if gt_line.strip()
     }
-    print(f"Ground Truth lines:\n{gt_lines}")
 
-    corrected_lines = {
-        line.line_id: correct_line_with_gt(
-            line.text.unicode, gt_lines, cutoff
+    return {
+        line_id: correction
+        for line_id, correction in pool.starmap(
+            correct_line_with_gt, [
+                (line, gt_lines, cutoff) for line in pred_lines
+            ]
         )
-        for line in pred_lines
     }
-
-    return corrected_lines
 
 
 def write_lines_to_pagexml(
@@ -184,26 +189,29 @@ def innermost_stem(path: Path) -> Path:
 
 def perform_scheduled_matchings(
     db: sqlite3.Connection, scheduled: List[Matching], cutoff: float,
-    intersperse: bool
+    intersperse: bool, process_count: int
 ):
-    for matching in scheduled:
-        gt_lines = match(matching, cutoff, intersperse)
+    with multiprocessing.Pool(process_count) as pool:
+        for matching in scheduled:
+            gt_lines = match(matching, cutoff, intersperse, pool)
 
-        if not matching.pred_path.is_file():
-            print(f"Warning: Path {matching.pred_path} is not a file.")
-            continue
+            if not matching.pred_path.is_file():
+                print(f"Warning: Path {matching.pred_path} is not a file.")
+                continue
 
-        with matching.pred_path.open("r") as file:
-            pcgts = PcGts.from_file(file)
+            with matching.pred_path.open("r") as file:
+                pcgts = PcGts.from_file(file)
 
-        write_lines_to_pagexml(
-            gt_lines, pcgts,
-            matching.pred_path.parent /
-            f"{innermost_stem(matching.pred_path)}.gt.xml"
-        )
+            write_lines_to_pagexml(
+                gt_lines, pcgts,
+                matching.pred_path.parent /
+                f"{innermost_stem(matching.pred_path)}.gt.xml"
+            )
 
 
 def main():
+    cpu_count = multiprocessing.cpu_count()
+
     arg_parser = argparse.ArgumentParser(
         "match",
         description=(
@@ -240,6 +248,14 @@ def main():
             "or kept without spaces otherwise."
         )
     )
+    arg_parser.add_argument(
+        "--process-count", dest="process_count", default=cpu_count, type=int,
+        help=(
+            "The amount of processes to use for computationally expensive " +
+            "tasks. Recommended value is the system's CPU count " +
+            f"(here: {cpu_count})."
+        )
+    )
     args = arg_parser.parse_args()
 
     with sqlite3.connect(args.progress_file) as conn:
@@ -251,7 +267,8 @@ def main():
 
             if scheduled:
                 perform_scheduled_matchings(
-                    conn, scheduled, args.cutoff, args.intersperse
+                    conn, scheduled, args.cutoff,
+                    args.intersperse, args.process_count
                 )
             else:
                 print("No matchings scheduled. Waiting for work...")
