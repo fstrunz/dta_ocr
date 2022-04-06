@@ -47,7 +47,7 @@ def fetch_scheduled_matchings(
         FROM matchings m
         JOIN predictions p ON m.dta_dirname = p.dta_dirname
         JOIN documents d ON m.dta_dirname = d.dta_dirname
-        {"WHERE m.status != 'finished'" if only_finished else ""}
+        {"WHERE m.status = 'pending'" if only_finished else ""}
         ORDER BY m.dta_dirname, m.page_number"""
     )
     return [
@@ -87,7 +87,7 @@ def correct_line_with_gt(
     )
     if matches:
         gt_lines.remove(matches[0])
-        print(f"{line_text} ===> {matches[0]}")
+        # print(f"{line_text} ===> {matches[0]}")
         return line.line_id, matches[0]
     else:
         return line.line_id, None
@@ -105,7 +105,7 @@ def load_dta_doc(tei_path: Path, intersperse: bool = False) -> DTADocument:
 def match(
     matching: Matching, cutoff: float, intersperse: bool,
     pool: multiprocessing.Pool
-) -> Dict[str, Optional[str]]:
+) -> Tuple[Dict[str, Optional[str]], float]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
             pcgts = PcGts.from_file(file)
@@ -132,14 +132,24 @@ def match(
         gt_line.strip() for gt_line in gt_text.split("\n") if gt_line.strip()
     }
 
-    return {
-        line_id: correction
-        for line_id, correction in pool.starmap(
-            correct_line_with_gt, (
-                (line, gt_lines, cutoff) for line in pred_lines
-            )
+    matched_count = 0
+    result: Dict[str, Optional[str]] = {}
+
+    for line_id, correction in pool.starmap(
+        correct_line_with_gt, (
+            (line, gt_lines, cutoff) for line in pred_lines
         )
-    }
+    ):
+        if correction is not None:
+            matched_count += 1
+        result[line_id] = correction
+
+    if len(pred_lines) > 0:
+        match_ratio = float(matched_count) / float(len(pred_lines))
+    else:
+        match_ratio = 0.0
+
+    return result, match_ratio
 
 
 def write_lines_to_pagexml(
@@ -187,26 +197,66 @@ def innermost_stem(path: Path) -> Path:
     return path_stem
 
 
+def write_matching_to_db(
+    db: sqlite3.Connection, gt_path: Path,
+    matching: Matching, match_ratio: float
+):
+    db.execute(
+        """UPDATE matchings
+        SET status = 'finished',
+            gt_path = ?,
+            match_ratio = ?
+        WHERE
+            dta_dirname = ? AND page_number = ?
+        """,
+        (
+            str(gt_path), match_ratio,
+            matching.dta_dirname, matching.page_number
+        )
+    )
+    db.commit()
+
+
+def write_matching_error_to_db(
+    db: sqlite3.Connection, matching: Matching
+):
+    db.execute(
+        """UPDATE matchings
+        SET status = 'error',
+            gt_path = NULL,
+            match_ratio = NULL
+        WHERE
+            dta_dirname = ? AND page_number = ?
+        """,
+        (
+            matching.dta_dirname, matching.page_number
+        )
+    )
+    db.commit()
+
+
 def perform_scheduled_matchings(
     db: sqlite3.Connection, scheduled: List[Matching], cutoff: float,
     intersperse: bool, process_count: int
 ):
     with multiprocessing.Pool(process_count) as pool:
         for matching in scheduled:
-            gt_lines = match(matching, cutoff, intersperse, pool)
+            gt_lines, match_ratio = match(matching, cutoff, intersperse, pool)
 
             if not matching.pred_path.is_file():
                 print(f"Warning: Path {matching.pred_path} is not a file.")
+                write_matching_error_to_db(db, matching)
                 continue
 
             with matching.pred_path.open("r") as file:
                 pcgts = PcGts.from_file(file)
 
-            write_lines_to_pagexml(
-                gt_lines, pcgts,
+            gt_path = (
                 matching.pred_path.parent /
                 f"{innermost_stem(matching.pred_path)}.gt.xml"
             )
+            write_lines_to_pagexml(gt_lines, pcgts, gt_path)
+            write_matching_to_db(db, gt_path, matching, match_ratio)
 
 
 def main():
@@ -263,7 +313,7 @@ def main():
         schedule_matchings(conn)
 
         while True:
-            scheduled = fetch_scheduled_matchings(conn, False)
+            scheduled = fetch_scheduled_matchings(conn)
 
             if scheduled:
                 perform_scheduled_matchings(

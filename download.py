@@ -302,7 +302,7 @@ async def main():
     arg_parser = argparse.ArgumentParser(
         "download",
         description=(
-            "Given an extracted copy of the complete DTA corpus, " +
+            "Given an extracted copy of the core or extended DTA corpus, " +
             "download the corresponding facsimiles. Such a corpus " +
             "can be downloaded at https://www.deutschestextarchiv.de/download."
         )

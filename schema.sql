@@ -76,6 +76,10 @@ CREATE TABLE IF NOT EXISTS matchings (
         ( status != 'finished' AND gt_path IS NULL ) OR
         ( status = 'finished' AND gt_path IS NOT NULL )
     ),
+    match_ratio REAL CHECK (
+        ( status = 'finished' AND match_ratio IS NOT NULL ) OR
+        ( status != 'finished' AND match_ratio IS NULL )
+    ),
     status TEXT CHECK (
         status IN ( 'pending', 'error', 'finished' )
     ) NOT NULL,
