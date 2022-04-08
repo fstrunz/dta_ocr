@@ -17,7 +17,9 @@ class DTAPage:
 class DTADocument:
     pages: Dict[int, DTAPage]
 
-    def get_page_text(self, facsimile: int) -> str:
+    def get_page_text(self, facsimile: int) -> Optional[str]:
+        if facsimile not in self.pages:
+            return None
         return self.pages[facsimile].text
 
     @staticmethod

@@ -127,6 +127,12 @@ def match(
     doc = load_dta_doc(matching.tei_path, intersperse=intersperse)
     gt_text = doc.get_page_text(matching.page_number)
 
+    if gt_text is None:
+        print(
+            f"Warning: No GT text found for {matching.dta_dirname} " +
+            f"page {matching.page_number}!"
+        )
+        return {}, 0.0
     gt_lines: Set[str] = {
         gt_line.strip() for gt_line in gt_text.split("\n") if gt_line.strip()
     }
