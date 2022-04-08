@@ -5,6 +5,7 @@ import fuzzysearch
 import time
 import difflib
 import multiprocessing
+import csv
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,9 +122,7 @@ def match(
     else:
         pred_lines: List[Line] = []
 
-    print("===============================")
     print(f"MATCHING {matching.dta_dirname} page {matching.page_number}")
-    print("===============================")
 
     doc = load_dta_doc(matching.tei_path, intersperse=intersperse)
     gt_text = doc.get_page_text(matching.page_number)
@@ -259,6 +258,29 @@ def perform_scheduled_matchings(
             write_matching_to_db(db, gt_path, matching, match_ratio)
 
 
+def evaluate_matchings(
+    scheduled: List[Matching], intersperse: bool, process_count: int
+):
+    print("Start writing evaluation to eval.csv...")
+    with open("eval.csv", "w") as csvfile:
+        csvwriter = csv.writer(csvfile)
+        csvwriter.writerow([
+            "cutoff", "dta_dirname", "page_number", "match_ratio"
+        ])
+        with multiprocessing.Pool(process_count) as pool:
+            cutoff = 0.0
+            while cutoff <= 1.0:
+                print(f"Evaluating cutoff {cutoff}...")
+                for matching in scheduled:
+                    _, match_ratio = match(matching, cutoff, intersperse, pool)
+                    csvwriter.writerow([
+                        cutoff, matching.dta_dirname,
+                        matching.page_number, match_ratio
+                    ])
+                csvfile.flush()
+                cutoff += 0.1
+
+
 def main():
     cpu_count = multiprocessing.cpu_count()
 
@@ -306,25 +328,36 @@ def main():
             f"(here: {cpu_count})."
         )
     )
+    arg_parser.add_argument(
+        "--evaluate", dest="evaluate", action="store_true",
+        help=(
+            "If this argument is set, the script will evaluate an optimal " +
+            "cutoff value using the provided data."
+        )
+    )
     args = arg_parser.parse_args()
 
     with sqlite3.connect(args.progress_file) as conn:
         create_progress_schema(conn)
         schedule_matchings(conn)
 
-        while True:
-            scheduled = fetch_scheduled_matchings(conn)
+        if args.evaluate:
+            scheduled = fetch_scheduled_matchings(conn, False)
+            evaluate_matchings(scheduled, args.intersperse, args.process_count)
+        else:
+            while True:
+                scheduled = fetch_scheduled_matchings(conn)
 
-            if scheduled:
-                perform_scheduled_matchings(
-                    conn, scheduled, args.cutoff,
-                    args.intersperse, args.process_count
-                )
-            else:
-                print("No matchings scheduled. Waiting for work...")
-                time.sleep(10.0)
+                if scheduled:
+                    perform_scheduled_matchings(
+                        conn, scheduled, args.cutoff,
+                        args.intersperse, args.process_count
+                    )
+                else:
+                    print("No matchings scheduled. Waiting for work...")
+                    time.sleep(10.0)
 
-            schedule_matchings(conn)
+                schedule_matchings(conn)
 
 
 if __name__ == "__main__":
