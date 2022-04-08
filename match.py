@@ -310,11 +310,9 @@ def main():
     arg_parser.add_argument(
         "--cutoff", dest="cutoff", type=float, default=0.8,
         help=(
-            "When matching, any substrings with a levenshtein distance " +
-            "of this parameter or higher will be discarded. Higher values " +
-            "allow more tolerance for mistakes in the prediction, but will " +
-            "take significantly longer to process! Allowing more mistakes " +
-            "also enables the possibility of matching unrelated strings."
+            "The minimum similarity to tolerate for matching. " +
+            "1.0 represents exact matches, 0.0 represents no " +
+            "comparison at all."
         )
     )
     arg_parser.add_argument(
