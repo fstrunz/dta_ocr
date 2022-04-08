@@ -17,7 +17,9 @@ class DTAPage:
 class DTADocument:
     pages: Dict[int, DTAPage]
 
-    def get_page_text(self, facsimile: int) -> str:
+    def get_page_text(self, facsimile: int) -> Optional[str]:
+        if facsimile not in self.pages:
+            return None
         return self.pages[facsimile].text
 
     @staticmethod
@@ -38,11 +40,12 @@ class TEIParser:
         self, node: Union[Tag, NavigableString], pages: Dict[int, DTAPage],
         facs: Optional[int] = None
     ) -> int:
+        pages[None] = DTAPage(-1, "")
         if isinstance(node, Tag):
-            if node.name == "pb" and facs is not None:  # page boundary
+            if node.name == "pb":  # page boundary
                 facs = int(PB_REGEX.match(node["facs"]).group(1))
                 pages[facs] = DTAPage(facs, "")
-            elif node.name == "lb" and facs is not None and facs in pages:
+            elif node.name == "lb":
                 # line break
                 pages[facs].text += "\n"
             else:
