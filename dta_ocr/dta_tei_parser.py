@@ -39,10 +39,11 @@ class TEIParser:
         facs: Optional[int] = None
     ) -> int:
         if isinstance(node, Tag):
-            if node.name == "pb":  # page boundary
+            if node.name == "pb" and facs is not None:  # page boundary
                 facs = int(PB_REGEX.match(node["facs"]).group(1))
                 pages[facs] = DTAPage(facs, "")
-            elif node.name == "lb":  # line break
+            elif node.name == "lb" and facs is not None and facs in pages:
+                # line break
                 pages[facs].text += "\n"
             else:
                 for child in node:
