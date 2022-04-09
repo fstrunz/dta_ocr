@@ -26,8 +26,7 @@ def create_symlinks(facsimile_path: Path):
             if doc_path.suffixes == [".gt", ".xml"]:
                 filename = f"{dta_dirname}_{innermost_stem(doc_path)}"
 
-                os.symlink(doc_path, training_path /
-                           f"{filename}.xml")
+                os.symlink(doc_path, training_path / f"{filename}.gt.xml")
                 os.symlink(
                     doc_path / Path(f"{innermost_stem(doc_path)}.jpg"),
                     training_path /
