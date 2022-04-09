@@ -1,4 +1,4 @@
-import os
+import shutil
 import argparse
 from pathlib import Path
 
@@ -26,20 +26,26 @@ def create_symlinks(facsimile_path: Path):
             if doc_path.suffixes == [".gt", ".xml"]:
                 filename = f"{dta_dirname}_{innermost_stem(doc_path)}"
 
-                os.symlink(doc_path, training_path / f"{filename}.gt.xml")
-                os.symlink(
-                    doc_path / Path(f"{innermost_stem(doc_path)}.jpg"),
-                    training_path /
-                    f"{filename}.jpg"
+                img_path = (
+                    document_path /
+                    Path(f"{innermost_stem(doc_path)}.jpg")
                 )
+                if not img_path.is_file():
+                    print(f"{img_path} is not a file, skipping...")
+                    continue
+
+                print("Creating {filename}...")
+
+                doc_path.rename(training_path / f"{filename}.xml")
+                shutil.copy(img_path, training_path / "{filename}.jpg")
 
 
 def main():
     arg_parser = argparse.ArgumentParser(
-        "makegtsymlinks",
+        "movegt",
         description=(
-            "Given a facsimile directory, creates a directory of symlinks " +
-            "to the facsimiles which can be used for Calamari training."
+            "Given a facsimile directory, moves the GT files to  " +
+            "a training directory and copies the facsimiles."
         )
     )
     arg_parser.add_argument(
