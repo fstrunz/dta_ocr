@@ -34,7 +34,7 @@ def create_symlinks(facsimile_path: Path):
                     print(f"{img_path} is not a file, skipping...")
                     continue
 
-                print("Creating {filename}...")
+                print(f"Creating {filename}...")
 
                 doc_path.rename(training_path / f"{filename}.xml")
                 shutil.copy(img_path, training_path / "{filename}.jpg")
