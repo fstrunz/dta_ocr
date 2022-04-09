@@ -6,9 +6,11 @@ venv/
 *.mlmodel
 *.pronn
 *.csv
+*.bak
 __pycache__/
 
 # DTA Corpus
 dta_komplett_*/
 dta_kernkorpus_*/
 facsimiles/
+training/
