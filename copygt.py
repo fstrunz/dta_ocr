@@ -34,18 +34,17 @@ def create_symlinks(facsimile_path: Path):
                     print(f"{img_path} is not a file, skipping...")
                     continue
 
-                print(f"Creating {filename}...")
-
-                doc_path.rename(training_path / f"{filename}.xml")
-                shutil.copy(img_path, training_path / "{filename}.jpg")
+                print(f"Copying {filename}...")
+                shutil.copy(doc_path, training_path / f"{filename}.xml")
+                shutil.copy(img_path, training_path / f"{filename}.jpg")
 
 
 def main():
     arg_parser = argparse.ArgumentParser(
-        "movegt",
+        "copygt",
         description=(
-            "Given a facsimile directory, moves the GT files to  " +
-            "a training directory and copies the facsimiles."
+            "Given a facsimile directory, copies the GT files and  " +
+            "facsimiles into a training directory."
         )
     )
     arg_parser.add_argument(
