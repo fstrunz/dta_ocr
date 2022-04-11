@@ -1,6 +1,7 @@
 import shutil
 import argparse
 from pathlib import Path
+import random
 
 
 # Path("abc.pred.xml").stem will yield "abc.pred".
@@ -15,14 +16,16 @@ def innermost_stem(path: Path) -> Path:
     return path_stem
 
 
-def create_symlinks(facsimile_path: Path):
+def copy_gt(facsimile_path: Path, only_one: bool):
     training_path = Path("training")
     training_path.mkdir(exist_ok=True)
 
     for document_path in facsimile_path.iterdir():
         dta_dirname = innermost_stem(document_path)
+        docs = list(document_path.iterdir())
+        random.shuffle(docs)
 
-        for doc_path in document_path.iterdir():
+        for doc_path in docs:
             if doc_path.suffixes == [".gt", ".xml"]:
                 filename = f"{dta_dirname}_{innermost_stem(doc_path)}"
 
@@ -37,6 +40,9 @@ def create_symlinks(facsimile_path: Path):
                 print(f"Copying {filename}...")
                 shutil.copy(doc_path, training_path / f"{filename}.xml")
                 shutil.copy(img_path, training_path / f"{filename}.jpg")
+
+                if only_one:
+                    break
 
 
 def main():
@@ -54,6 +60,10 @@ def main():
             "and segment.py."
         )
     )
+    arg_parser.add_argument(
+        "--only-one", dest="only_one", action="store_true",
+        help="Copies only one random page from each work."
+    )
     args = arg_parser.parse_args()
 
     facsimile_path = Path(args.facsimile_dir)
@@ -61,7 +71,7 @@ def main():
         print("Given --facsimile-dir is not a directory!!!")
         exit(1)
 
-    create_symlinks(facsimile_path)
+    copy_gt(facsimile_path, args.only_one)
 
 
 if __name__ == "__main__":
