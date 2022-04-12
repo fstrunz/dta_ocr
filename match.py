@@ -6,6 +6,7 @@ import time
 import difflib
 import multiprocessing
 import csv
+import statistics
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -266,26 +267,28 @@ def perform_scheduled_matchings(
 
 
 def evaluate_matchings(
-    scheduled: List[Matching], intersperse: bool, process_count: int
+    scheduled: List[Matching], intersperse: bool, process_count: int,
+    step: float
 ):
     print("Start writing evaluation to eval.csv...")
     with open("eval.csv", "w") as csvfile:
         csvwriter = csv.writer(csvfile)
-        csvwriter.writerow([
-            "cutoff", "dta_dirname", "page_number", "match_ratio"
-        ])
+        csvwriter.writerow(["cutoff", "match_ratio"])
         with multiprocessing.Pool(process_count) as pool:
             cutoff = 0.0
             while cutoff <= 1.0:
+                match_ratios = []
                 print(f"Evaluating cutoff {cutoff}...")
                 for matching in scheduled:
                     _, match_ratio = match(matching, cutoff, intersperse, pool)
-                    csvwriter.writerow([
-                        cutoff, matching.dta_dirname,
-                        matching.page_number, match_ratio
-                    ])
+                    if matching.pred_path.is_file():
+                        match_ratios.append(match_ratio)
+
+                csvwriter.writerow([
+                    cutoff, statistics.mean(match_ratios)
+                ])
                 csvfile.flush()
-                cutoff += 0.1
+                cutoff += step
 
 
 def main():
@@ -340,6 +343,13 @@ def main():
             "cutoff value using the provided data."
         )
     )
+    arg_parser.add_argument(
+        "--evaluate-step", dest="evaluate_step", default=0.1, type=float,
+        help=(
+            "While evaluating, this determines the amount to increase " +
+            "cutoff by after each evaluation."
+        )
+    )
     args = arg_parser.parse_args()
 
     with sqlite3.connect(args.progress_file) as conn:
@@ -348,7 +358,10 @@ def main():
 
         if args.evaluate:
             scheduled = fetch_scheduled_matchings(conn, False)
-            evaluate_matchings(scheduled, args.intersperse, args.process_count)
+            evaluate_matchings(
+                scheduled, args.intersperse, args.process_count,
+                args.evaluate_step
+            )
         else:
             while True:
                 scheduled = fetch_scheduled_matchings(conn)
