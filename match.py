@@ -78,7 +78,7 @@ def correct_line_with_gt_ext(
 
 
 def correct_line_with_gt(
-    line: Line, gt_lines: Set[str], cutoff: float
+    line: Line, gt_lines: Set[str], cutoff: float, max_len_diff: Optional[int]
 ) -> Optional[Tuple[str, str]]:
     line_text = line.text.unicode
     if not line_text:
@@ -88,8 +88,13 @@ def correct_line_with_gt(
         line_text, gt_lines, n=1, cutoff=cutoff
     )
     if matches:
-        gt_lines.remove(matches[0])
-        # print(f"{line_text} ===> {matches[0]}")
+        gt_text = matches[0]
+
+        if max_len_diff is not None:
+            if abs(len(gt_text) - len(line_text)) >= max_len_diff:
+                return line.line_id, None
+
+        gt_lines.remove(gt_text)
         return line.line_id, matches[0]
     else:
         return line.line_id, None
@@ -106,7 +111,7 @@ def load_dta_doc(tei_path: Path, intersperse: bool = False) -> DTADocument:
 # given a scheduled matching, compute the new GT lines
 def match(
     matching: Matching, cutoff: float, intersperse: bool,
-    pool: multiprocessing.Pool
+    max_len_diff: Optional[int], pool: multiprocessing.Pool
 ) -> Tuple[Dict[str, Optional[str]], float]:
     if matching.pred_path.is_file():
         with matching.pred_path.open("r") as file:
@@ -144,7 +149,7 @@ def match(
 
     for line_id, correction in pool.starmap(
         correct_line_with_gt, (
-            (line, gt_lines, cutoff) for line in pred_lines
+            (line, gt_lines, cutoff, max_len_diff) for line in pred_lines
         )
     ):
         if correction is not None:
@@ -244,11 +249,13 @@ def write_matching_error_to_db(
 
 def perform_scheduled_matchings(
     db: sqlite3.Connection, scheduled: List[Matching], cutoff: float,
-    intersperse: bool, process_count: int
+    intersperse: bool, max_len_diff: int, process_count: int
 ):
     with multiprocessing.Pool(process_count) as pool:
         for matching in scheduled:
-            gt_lines, match_ratio = match(matching, cutoff, intersperse, pool)
+            gt_lines, match_ratio = match(
+                matching, cutoff, intersperse, max_len_diff, pool
+            )
 
             if not matching.pred_path.is_file():
                 print(f"Warning: Path {matching.pred_path} is not a file.")
@@ -268,21 +275,28 @@ def perform_scheduled_matchings(
 
 def evaluate_matchings(
     scheduled: List[Matching], intersperse: bool, process_count: int,
-    step: float
+    max_len_diff: int, step: float
 ):
     print("Start writing evaluation to eval.csv...")
+
     with open("eval.csv", "w") as csvfile:
         csvwriter = csv.writer(csvfile)
         csvwriter.writerow(["cutoff", "match_ratio"])
         with multiprocessing.Pool(process_count) as pool:
             cutoff = 0.0
+
             while cutoff <= 1.0:
                 match_ratios = []
                 print(f"Evaluating cutoff {cutoff}...")
+
                 for matching in scheduled:
-                    _, match_ratio = match(matching, cutoff, intersperse, pool)
-                    if matching.pred_path.is_file():
-                        match_ratios.append(match_ratio)
+                    if not matching.pred_path.is_file():
+                        continue
+
+                    _, match_ratio = match(
+                        matching, cutoff, intersperse, max_len_diff, pool
+                    )
+                    match_ratios.append(match_ratio)
 
                 csvwriter.writerow([
                     cutoff, statistics.mean(match_ratios)
@@ -350,6 +364,14 @@ def main():
             "cutoff by after each evaluation."
         )
     )
+    arg_parser.add_argument(
+        "--max-len-diff", dest="max_len_diff",
+        default=None, type=int,
+        help=(
+            "By how many characters in length PRED may differ from GT " +
+            "before being discarded."
+        )
+    )
     args = arg_parser.parse_args()
 
     with sqlite3.connect(args.progress_file) as conn:
@@ -360,7 +382,7 @@ def main():
             scheduled = fetch_scheduled_matchings(conn, False)
             evaluate_matchings(
                 scheduled, args.intersperse, args.process_count,
-                args.evaluate_step
+                args.max_len_diff, args.evaluate_step
             )
         else:
             while True:
@@ -369,7 +391,8 @@ def main():
                 if scheduled:
                     perform_scheduled_matchings(
                         conn, scheduled, args.cutoff,
-                        args.intersperse, args.process_count
+                        args.intersperse, args.max_len_diff,
+                        args.process_count
                     )
                 else:
                     print("No matchings scheduled. Waiting for work...")
