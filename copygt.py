@@ -39,7 +39,11 @@ def copy_gt(facsimile_path: Path, only_one: bool):
 
                 print(f"Copying {filename}...")
                 shutil.copy(doc_path, training_path / f"{filename}.xml")
-                shutil.copy(img_path, training_path / f"{filename}.jpg")
+
+                jpg_path = training_path / f"{filename}.jpg"
+                if not jpg_path.is_file():
+                    # dont copy if it has already been copied
+                    shutil.copy(img_path, jpg_path)
 
                 if only_one:
                     break
